@@ -404,7 +404,10 @@ suite "replay":
   test "events round-trip and a tampered turn event is rejected":
     let config = fixtureConfig(bars = 4, seed = 12)
     var live = initSim(config)
-    live.writeAll(onlyAt([0, 4, 8, 12], 2))
+    ## Play the episode out: the `end` event exists only once the sim
+    ## settles, and the codec is asserted over one event of EVERY kind.
+    while not live.done:
+      live.writeAll(onlyAt([0, 4, 8, 12], 2))
     var kinds = initHashSet[EventKind]()
     for event in live.events:
       kinds.incl(event.kind)
@@ -425,6 +428,7 @@ suite "replay":
     check evStart in kinds
     check evTurn in kinds
     check evBar in kinds
+    check evEnd in kinds
     var moved = live.events
     for index in 0 ..< moved.len:
       if moved[index].kind == evTurn and moved[index].turn == 1:
