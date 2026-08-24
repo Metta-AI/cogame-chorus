@@ -42,6 +42,10 @@ type
     steps*: seq[int]
     say*: string
     notes*: string      ## "" when the reply carried none
+    scripted*: bool     ## true when a baseline produced this bar rather
+                        ## than a parsed model reply — including the
+                        ## fallback after the retry is exhausted. The
+                        ## replay's `bar.scripted` flag is this field.
 
   LlmTransport = enum
     ltNone, ltBedrock, ltAnthropic
@@ -201,6 +205,7 @@ proc scriptedAction*(sim: Sim, seat: int, kind: ScriptKind): Decision =
   ## always writes this turn's new bar.
   let voice = sim.voiceOf[seat]
   result.target = sim.turn
+  result.scripted = true
   result.steps =
     case kind
     of skPedal: pedalBar(sim, voice, sim.turn)

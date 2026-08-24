@@ -4,7 +4,7 @@
 ## arpeggio baseline must also actually make music, or it is no partner worth
 ## beating; the pedal baseline must be the weaker of the two.
 
-import std/[json, monotimes, strutils, times, unicode, unittest]
+import std/[json, monotimes, os, strutils, times, unicode, unittest]
 import chorus/[llm, sim]
 
 proc fixture(seed: int, bars = 8): GameConfig =
@@ -107,17 +107,53 @@ suite "scripted baselines":
       let kind = if seat == 2: skPedal else: skArpeggio
       check decisions[index].steps == scriptedAction(sim, seat, kind).steps
       check decisions[index].target == sim.turn
+      check decisions[index].scripted
       ## Legal as-is: applyBar raises on anything else.
       sim.applyBar(seat, decisions[index].target, decisions[index].steps,
-        "", "", true)
+        "", "", decisions[index].scripted)
     check sim.turn == 1
     check sim.turnsPlayed == 1
+
+  test "a seat that fails both attempts is recorded as scripted":
+    ## The retry-exhausted fallback must be distinguishable from a parsed
+    ## reply in the RECORDED bar, or phase 60 counts no fallbacks at all on a
+    ## live episode. Point an enabled client at a closed port so both
+    ## attempts fail on transport, fast and without a network.
+    putEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME", "http://127.0.0.1:9")
+    putEnv("AWS_BEARER_TOKEN_BEDROCK", "unusable-in-tests")
+    var config = fixture(7, bars = 6)
+    config.llmTimeoutSeconds = 5
+    let client = newLlmClient(config)
+    delEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME")
+    delEnv("AWS_BEARER_TOKEN_BEDROCK")
+    check not client.disabled
+    var sim = initSim(config)
+    let seats = sim.pendingSeats()
+    let decisions = client.decideAll(sim, seats, @["", "", "", ""],
+      @[skNone, skNone, skNone, skNone])
+    check decisions.len == Seats
+    for index, seat in seats:
+      check decisions[index].scripted
+      check decisions[index].steps ==
+        scriptedAction(sim, seat, skArpeggio).steps
+      sim.applyBar(seat, decisions[index].target, decisions[index].steps,
+        decisions[index].say, decisions[index].notes,
+        decisions[index].scripted)
+    var bars = 0
+    for event in sim.events:
+      if event.kind == evBar:
+        bars.inc
+        check event.scripted
+    check bars == Seats
 
   test "model replies parse tolerantly and reject the illegal ones":
     let array16 = "[0,-1,-1,4,-1,-1,2,-1,0,-1,-1,4,-1,-1,-1,-1]"
     let want = @[0, -1, -1, 4, -1, -1, 2, -1, 0, -1, -1, 4, -1, -1, -1, -1]
     check parseDecision(parseJson("""{"target": 2, "steps": """ & array16 &
       "}"), 3).steps == want
+    ## A parsed reply is the model's own bar, never a baseline.
+    check not parseDecision(parseJson("""{"target": 2, "steps": """ &
+      array16 & "}"), 3).scripted
     ## The string form, space- and comma-separated, with every rest spelling.
     check parseDecision(parseJson(
       """{"steps": "0 . r 4 R rest - -1 0 . . 4 . . . ."}"""), 0).steps ==

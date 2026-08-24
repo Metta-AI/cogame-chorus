@@ -340,7 +340,10 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       withLock stateLock:
         for index, seat in seats:
           let decision = decisions[index]
-          let wasScripted = scripted[seat] != skNone or client.disabled
+          ## Provenance rides in the decision: a seat whose two attempts
+          ## timed out or failed to parse comes back from `decideAll` as a
+          ## baseline bar, and only the decision knows that.
+          let wasScripted = decision.scripted
           echo "chorus: turn ", state.sim.turn, " ", state.sim.names[seat],
             " (", state.sim.voiceName(seat), ") writes bar ",
             decision.target,
