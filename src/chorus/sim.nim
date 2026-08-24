@@ -30,16 +30,16 @@ const
   RootNames* = ["C", "D", "E♭", "F", "G", "A"]
   ModeNames* = ["ionian", "dorian", "aeolian", "mixolydian"]
   Scales* = [
-    [0, 2, 4, 5, 7, 9, 11],   ## ionian
-    [0, 2, 3, 5, 7, 9, 10],   ## dorian
-    [0, 2, 3, 5, 7, 8, 10],   ## aeolian
-    [0, 2, 4, 5, 7, 9, 10]    ## mixolydian
+    [0, 2, 4, 5, 7, 9, 11],   # ionian
+    [0, 2, 3, 5, 7, 9, 10],   # dorian
+    [0, 2, 3, 5, 7, 8, 10],   # aeolian
+    [0, 2, 4, 5, 7, 9, 10]    # mixolydian
   ]
   Progressions* = [
-    [0, 3, 4, 0],   ## I  IV V  I
-    [0, 5, 3, 4],   ## I  vi IV V
-    [0, 4, 5, 3],   ## I  V  vi IV
-    [5, 3, 0, 4]    ## vi IV I  V
+    [0, 3, 4, 0],   # I  IV V  I
+    [0, 5, 3, 4],   # I  vi IV V
+    [0, 4, 5, 3],   # I  V  vi IV
+    [5, 3, 0, 4]    # vi IV I  V
   ]
   ## Roman numerals for a chord rooted on each scale degree.
   ChordNames* = ["I", "ii", "iii", "IV", "V", "vi", "vii"]
@@ -673,10 +673,11 @@ proc replayMatch*(config: GameConfig, events: seq[GameEvent]): seq[Sim] =
         if abs(event.credits[index] - expected.credits[index]) > 1e-4:
           raise newException(ChorusError,
             "turn " & $event.turn & " credits do not match")
-      ## The live log wrote this turn event when the turn opened; the
-      ## replayed sim did too (inside the last applyBar / initSim), so
-      ## nothing is appended here.
-      if sim.events.len == 0 or sim.events[^1].kind != evTurn:
+      ## The live log wrote this turn event when the turn opened (or, for
+      ## the last one, when the piece finished); the replayed sim did too,
+      ## inside the last applyBar / initSim, so nothing is appended here.
+      if not sim.done and
+          (sim.events.len == 0 or sim.events[^1].kind != evTurn):
         sim.events.add(event)
     of evBar:
       sim.applyBar(event.seat, event.target, event.steps, event.say,

@@ -917,9 +917,14 @@
       return line;
     }
     var parts = ["BAR " + (state.turn || 0) + " / " + (state.turns || 0)];
-    parts.push(String(state.key || "").toUpperCase() + " " +
-      String(state.mode || "").toUpperCase());
-    parts.push((state.bpm || 0) + " BPM");
+    // At embedded widths the key and the tempo are already on the chord
+    // ribbon, and the bar count plus who the table is waiting on is what has
+    // to stay readable at 360 px.
+    if (!window.innerWidth || window.innerWidth >= COMPACT_W) {
+      parts.push(String(state.key || "").toUpperCase() + " " +
+        String(state.mode || "").toUpperCase());
+      parts.push((state.bpm || 0) + " BPM");
+    }
     var waiting = (state.seats || []).filter(function (s) {
       return s.pending;
     });
@@ -1123,8 +1128,10 @@
     var grid = [[], [], [], []];
     var seats = [];
     for (var i = 0; i < 4; i++) {
+      // The other three seats are placeholders: a player frame is redacted
+      // to its own voice, so nothing here may claim to know theirs.
       seats.push({ name: "Seat " + i, seat: i, voice: i,
-        voiceName: VOICE_NAMES[i], base: [36, 48, 60, 72][i], score: 0,
+        voiceName: "", base: [36, 48, 60, 72][i], score: 0,
         onsets: 0, bars: [], pending: false, lastTarget: -1,
         lastEdit: false });
     }

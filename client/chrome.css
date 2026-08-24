@@ -578,10 +578,12 @@ body.audio-on .end-mute { display: inline-block; }
   margin-top: 14px;
 }
 
-/* Feed line colours for the chorus event vocabulary. */
-.feed-turn-line { color: var(--paper); font-weight: 600; }
-.feed-bar { color: var(--tc, var(--paper-dim)); }
-.feed-start { color: var(--paper-dim); }
+/* Feed line colours for the chorus event vocabulary. A `bar` line is tinted
+   with the writing seat's colour; a `turn` line reuses the starter's boxed
+   .feed-turn block as the per-bar score summary. */
+.feed-line.feed-turn { color: var(--paper); font-weight: 600; }
+.feed-line.feed-bar { color: var(--tc, var(--paper-dim)); }
+.feed-line.feed-start { color: var(--paper-dim); }
 
 @media (max-width: 640px) {
   /* Words are words: the voice tag goes, the name and the credit stay. */
