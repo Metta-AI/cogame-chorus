@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Chorus — Replay</title>
+<link rel="stylesheet" href="/client/chrome.css">
+</head>
+<body>
+<div id="layout">
+  <div id="stage">
+    <div id="topband">
+      <div id="wordmark">CHO<span>RUS</span></div>
+      <div id="clock">BAR 0</div>
+      <div id="topright">
+        <span id="statuschip">replay</span>
+        <button id="feedtoggle">LOG »</button>
+      </div>
+    </div>
+    <div id="scorebug"></div>
+    <div id="board-wrap">
+      <canvas id="table" width="960" height="640"></canvas>
+      <div id="lightpool"></div>
+      <div id="grain"></div>
+      <div id="endscreen"></div>
+    </div>
+    <div id="transport">
+      <div class="scrub" id="scrub"></div>
+      <div class="tbar">
+        <button class="tbtn" id="play">❚❚</button>
+        <span class="tpos" id="pos">0 / 0</span>
+      </div>
+    </div>
+    </div>
+  <div id="feed"></div>
+</div>
+<div id="loading">LOADING REPLAY…</div>
+<script src="/client/chrome_common.js"></script>
+<script src="/client/renderer.js"></script>
+<script>
+  var canvas = document.getElementById("table");
+  function fit() {
+    canvas.width = canvas.clientWidth;
+    canvas.height = canvas.clientHeight;
+  }
+  window.addEventListener("resize", fit);
+  window.addEventListener("load", fit);
+  fit();
+  ChorusRenderer.bindFeedToggle(document.getElementById("feedtoggle"), true);
+  var scheme = location.protocol === "https:" ? "wss://" : "ws://";
+  var socket = new WebSocket(scheme + location.host + "/replay");
+  socket.onmessage = function (frame) {
+    var payload = JSON.parse(frame.data);
+    if (payload.type !== "replay") return;
+    document.getElementById("loading").style.display = "none";
+    fit();
+    ChorusRenderer.attachReplay({
+      canvas: canvas,
+      feed: document.getElementById("feed"),
+      scrub: document.getElementById("scrub"),
+      playButton: document.getElementById("play"),
+      label: document.getElementById("pos"),
+      clock: document.getElementById("clock"),
+      scorebug: document.getElementById("scorebug"),
+      endscreen: document.getElementById("endscreen"),
+      assetBase: "/client/assets",
+      payload: payload
+    });
+    socket.onmessage = null;
+  };
+  socket.onerror = function () {
+    document.getElementById("loading").textContent = "REPLAY FAILED TO LOAD";
+  };
+</script>
+<!-- chorus additions to the inherited cogame-bullwhip chrome -->
+<!-- Nothing above this banner is removed or rewritten: the block below only
+     ADDS the two pieces of chrome chorus needs — the ♪ AUDIO toggle, which
+     lives inside the existing .tbar (in the transport band, never overlaid on
+     it), and the voice legend strip. Both are built here rather than inlined
+     into the starter's markup so the inherited page stays intact. -->
+<script>
+  (function () {
+    var VOICES = ["Bass", "Tenor", "Alto", "Soprano"];
+    var transport = document.getElementById("transport");
+    var tbar = transport ? transport.querySelector(".tbar") : null;
+    if (tbar) {
+      var audio = document.createElement("button");
+      audio.type = "button";
+      audio.className = "tbtn";
+      audio.id = "audio";
+      audio.textContent = "♪ AUDIO";
+      tbar.insertBefore(audio, document.getElementById("pos"));
+    }
+    var legend = document.createElement("div");
+    legend.id = "chorus-legend";
+    VOICES.forEach(function (name, voice) {
+      var item = document.createElement("span");
+      item.className = "legend-item";
+      item.dataset.voice = String(voice);
+      var swatch = document.createElement("span");
+      swatch.className = "legend-swatch";
+      var text = document.createElement("span");
+      text.className = "legend-text";
+      text.textContent = name.toUpperCase();
+      item.appendChild(swatch);
+      item.appendChild(text);
+      legend.appendChild(item);
+    });
+    (transport || document.getElementById("stage") || document.body)
+      .appendChild(legend);
+    if (window.ChorusChrome) window.ChorusChrome.relayout();
+  })();
+</script>
+</body>
+</html>

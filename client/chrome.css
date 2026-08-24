@@ -1,0 +1,602 @@
+/* ============================================================
+   Parley chrome — Ink & Print, matching the coworld-ctf replay
+   broadcast: warm CRT-phosphor stage (never pure black/white),
+   paper-on-ink chrome in solid bands, amber accents.
+   Palette: stage #16110d→#241a12, paper #f2e8d8, ink #2a1f16,
+   red #e0523a, blue #3f7cc4, green #45a85e, yellow #ddc531,
+   amber #e8a33d, ghost #8a7f72.
+   ============================================================ */
+@font-face {
+  font-family: "rajdhani";
+  src: url("assets/font.ttf") format("truetype");
+  font-display: block;
+}
+
+:root {
+  --stage-lo: #16110d;
+  --stage-hi: #241a12;
+  --paper: #f2e8d8;
+  --paper-dim: #b8ac98;
+  --ink: #2a1f16;
+  --red: #e0523a;
+  --blue: #3f7cc4;
+  --green: #45a85e;
+  --yellow: #ddc531;
+  --amber: #e8a33d;
+  --violet: #a86fd6;
+  --ghost: #8a7f72;
+  --pixfont: "rajdhani", "Segoe UI", system-ui, sans-serif;
+  --finefont: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+    sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  /* Letterbox: warm near-black, never pure #000. */
+  background: #120d09;
+  color: var(--paper);
+  font-family: var(--finefont);
+  -webkit-font-smoothing: antialiased;
+}
+
+#layout { display: flex; height: 100%; }
+
+#stage {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background:
+    radial-gradient(120% 90% at 50% 38%, var(--stage-hi) 0%, var(--stage-lo) 72%);
+}
+
+/* ---------- top band ---------- */
+#topband {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  background: var(--stage-lo);
+  box-shadow: inset 0 -1px 0 rgba(242, 232, 216, 0.06);
+  font-family: var(--pixfont);
+  z-index: 10;
+}
+#wordmark {
+  font-size: 19px;
+  letter-spacing: 0.12em;
+  color: var(--paper);
+  text-shadow: 0 2px 0 var(--ink);
+}
+#wordmark span { color: var(--amber); }
+#clock {
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  color: var(--paper);
+  text-align: center;
+  white-space: nowrap;
+}
+#statuschip {
+  justify-self: end;
+  font-family: var(--finefont);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--paper-dim);
+}
+#statuschip.live { color: var(--green); }
+
+/* ---------- board ---------- */
+#board-wrap { position: relative; flex: 1; min-height: 0; }
+canvas#table {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+/* Soft light pool focusing the table; grain gives the CRT drift. */
+#lightpool {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(70% 58% at 50% 46%, transparent 40%, rgba(12, 8, 5, 0.34) 100%);
+  z-index: 2;
+}
+#grain {
+  position: absolute;
+  inset: -20%;
+  pointer-events: none;
+  opacity: 0.05;
+  z-index: 3;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.5) 0 1px, transparent 1px 3px);
+  animation: graindrift 7s steps(4) infinite;
+}
+@keyframes graindrift { to { transform: translateY(3px); } }
+@media (prefers-reduced-motion: reduce) {
+  #grain { animation: none; }
+}
+
+/* ---------- transport (replay) ---------- */
+#transport {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 14px 9px;
+  background: var(--stage-lo);
+  box-shadow: inset 0 1px 0 rgba(242, 232, 216, 0.06);
+  z-index: 10;
+}
+.tbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tbtn {
+  font-family: var(--pixfont);
+  font-size: 12px;
+  color: var(--paper);
+  background: rgba(242, 232, 216, 0.08);
+  border: none;
+  padding: 5px 10px;
+  min-width: 34px;
+  cursor: pointer;
+  line-height: 1;
+}
+.tbtn:hover { background: rgba(242, 232, 216, 0.2); }
+.tbtn.on { color: var(--amber); box-shadow: inset 0 -2px 0 var(--amber); }
+.tpos {
+  margin-left: auto;
+  font-family: var(--pixfont);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--paper-dim);
+  white-space: nowrap;
+}
+/* Click-to-seek scrubber with per-event beat markers, like the CTF
+   transport: paper track/fill, amber playhead, ticks colored by the
+   shooter's seat. */
+.scrub {
+  position: relative;
+  height: 26px;
+  cursor: pointer;
+  touch-action: none;
+}
+.scrub-track {
+  position: absolute;
+  left: 0; right: 0; top: 11px;
+  height: 4px;
+  background: rgba(242, 232, 216, 0.16);
+}
+.scrub-fill {
+  position: absolute;
+  left: 0; top: 11px;
+  height: 4px;
+  width: 0;
+  background: var(--paper);
+}
+.scrub-head {
+  position: absolute;
+  top: 3px;
+  width: 3px;
+  height: 20px;
+  background: var(--amber);
+  transform: translateX(-1.5px);
+  left: 0;
+  z-index: 3;
+}
+.beat-marker {
+  position: absolute;
+  top: 6px;
+  width: 2px;
+  height: 8px;
+  transform: translateX(-1px);
+  background: var(--tc, var(--paper-dim));
+  z-index: 2;
+}
+.beat-marker.death { top: 2px; height: 14px; width: 3px; }
+.seat0 { --tc: var(--red); }
+.seat1 { --tc: var(--blue); }
+.seat2 { --tc: var(--green); }
+.seat3 { --tc: var(--yellow); }
+.seat4 { --tc: var(--violet); }
+
+/* ---------- feed ---------- */
+#feed {
+  width: 320px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  background: var(--stage-lo);
+  border-left: 1px solid rgba(242, 232, 216, 0.08);
+  font-size: 13px;
+  line-height: 1.5;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(242, 232, 216, 0.2) transparent;
+}
+.feed-turn {
+  margin-bottom: 10px;
+  padding: 2px 8px 4px;
+  border-left: 2px solid rgba(242, 232, 216, 0.1);
+}
+.feed-turn.feed-active {
+  border-left-color: var(--amber);
+  background: rgba(242, 232, 216, 0.04);
+}
+.feed-turn-head {
+  font-family: var(--finefont);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--paper-dim);
+  margin: 4px 0 4px;
+}
+.feed-active .feed-turn-head { color: var(--amber); }
+.feed-line { margin-bottom: 3px; color: var(--paper-dim); }
+.feed-say { color: var(--paper); }
+.feed-shot { color: var(--amber); }
+.feed-death { color: var(--red); font-weight: 700; }
+.feed-it { color: var(--paper-dim); }
+.feed-end { color: var(--amber); font-weight: 700; }
+.feed-future { opacity: 0.32; }
+
+#loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--paper-dim);
+  font-family: var(--pixfont);
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  pointer-events: none;
+  z-index: 20;
+}
+
+/* ---------- scorebug (second top-band row) ---------- */
+#scorebug {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  padding: 4px 14px 8px;
+  background: var(--stage-lo);
+  box-shadow: inset 0 -1px 0 rgba(242, 232, 216, 0.06);
+  font-family: var(--pixfont);
+  z-index: 10;
+}
+.plate {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+.plate-name {
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  color: var(--tc, var(--paper));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 2px 0 var(--ink);
+  /* The name is the one thing a plate must never lose: it shrinks last,
+     and never below a few characters, when the viewer is embedded small. */
+  min-width: 3.2em;
+  flex: 1 1 auto;
+}
+.plate.dead .plate-name { color: var(--ghost); text-decoration: line-through; }
+.plate-score { font-size: 17px; line-height: 1; color: var(--paper); flex: none; }
+.plate-label {
+  font-family: var(--finefont);
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--paper-dim);
+  flex: none;
+}
+.plate-pips { display: flex; gap: 3px; flex: none; align-self: center; }
+.plate-pip {
+  width: 7px; height: 7px;
+  background: var(--amber);
+}
+.plate-it {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--ink);
+  background: var(--amber);
+  padding: 1px 4px;
+  border-radius: 2px;
+  flex: none;
+  align-self: center;
+}
+
+/* ---------- scrubber round decoration ---------- */
+.round-span {
+  position: absolute;
+  top: 9px;
+  height: 8px;
+  background: rgba(242, 232, 216, 0.05);
+  z-index: 1;
+}
+.round-span.alt { background: rgba(232, 163, 61, 0.08); }
+.round-sep {
+  position: absolute;
+  top: 2px;
+  width: 2px;
+  height: 22px;
+  background: rgba(242, 232, 216, 0.45);
+  transform: translateX(-1px);
+  z-index: 2;
+}
+/* round-winner chip: a flag block above the track in the winner's color */
+.beat-marker.rwin {
+  top: 0;
+  height: 9px;
+  width: 8px;
+  transform: translateX(-4px);
+  box-shadow: 0 0 6px var(--tc, var(--amber));
+}
+
+/* ---------- feed rounds + collapse ---------- */
+.feed-round-head {
+  font-family: var(--pixfont);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  color: var(--paper);
+  margin: 12px 0 6px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid rgba(242, 232, 216, 0.14);
+}
+.feed-round-head:first-child { margin-top: 2px; }
+.feed-rwin { color: var(--amber); font-weight: 700; }
+#feedtoggle {
+  justify-self: end;
+  font-family: var(--pixfont);
+  font-size: 12px;
+  color: var(--paper-dim);
+  background: rgba(242, 232, 216, 0.08);
+  border: none;
+  padding: 3px 8px;
+  cursor: pointer;
+  line-height: 1;
+}
+#feedtoggle:hover { background: rgba(242, 232, 216, 0.2); color: var(--paper); }
+body.feed-collapsed #feed { display: none; }
+#topright { justify-self: end; display: flex; align-items: center; gap: 10px; }
+
+/* ---------- final score screen ---------- */
+#endscreen {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(18, 13, 9, 0.82);
+  z-index: 8;
+}
+#endscreen.show { display: flex; }
+.end-panel {
+  min-width: 380px;
+  max-width: 80%;
+  background: var(--stage-lo);
+  border: 1px solid rgba(242, 232, 216, 0.16);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6);
+  padding: 22px 26px 18px;
+  font-family: var(--pixfont);
+}
+.end-title {
+  font-family: var(--finefont);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--paper-dim);
+  text-align: center;
+}
+.end-verdict {
+  font-size: 26px;
+  letter-spacing: 0.06em;
+  text-align: center;
+  margin: 8px 0 16px;
+  color: var(--tc, var(--amber));
+  text-shadow: 0 2px 0 var(--ink);
+}
+.end-rows { display: grid; grid-template-columns: auto 1fr auto auto auto auto; gap: 6px 16px; }
+.end-head {
+  font-family: var(--finefont);
+  font-size: 8px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--paper-dim);
+  align-self: end;
+}
+.end-cell { font-size: 16px; color: var(--paper); white-space: nowrap; }
+.end-cell.rank { color: var(--paper-dim); }
+.end-cell.name { color: var(--tc, var(--paper)); overflow: hidden; text-overflow: ellipsis; }
+.end-row-winner .end-cell { color: var(--amber); }
+.end-row-winner .end-cell.name { color: var(--tc, var(--amber)); }
+
+.feed-score { color: var(--tc, var(--amber)); font-weight: 600; }
+
+/* Focus: one-line reason under the endscreen verdict. */
+.end-reason {
+  font-family: var(--finefont);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--paper-dim);
+  text-align: center;
+  margin: -10px 0 14px;
+}
+
+/* Babel: speak lines in the speaker's colour; pick lines dim until they
+   score; hollow pips for as-listener successes. */
+.feed-speak { color: var(--tc, var(--paper)); }
+.feed-round { color: var(--paper-dim); font-size: 11px; letter-spacing: 0.04em; }
+.feed-pick { color: var(--paper-dim); }
+.plate-pip.hollow {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--amber);
+}
+
+/* Bullwhip: role label and backlog chip on the plates; at embedded widths
+   the label goes and the backlog chip stays (it is the drama). */
+.plate-backlog {
+  font-family: var(--finefont);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--red);
+  flex: none;
+  white-space: nowrap;
+}
+.feed-notes { color: var(--ghost); font-size: 12px; }
+.feed-week { color: var(--paper-dim); font-size: 12px; }
+@media (max-width: 640px) {
+  .plate-label { display: none; }
+  .plate-score { font-size: 14px; }
+  #scorebug { gap: 6px; padding: 3px 8px 6px; }
+}
+@media (max-width: 420px) {
+  #scorebug { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ---------- chorus additions ---------- */
+/* Everything above this line is cogame-bullwhip/client/chrome.css, byte for
+   byte. Nothing above is edited; chorus only appends. */
+
+:root {
+  /* Published by ChorusChrome.relayout() on every load/resize/LOG toggle.
+     Every chorus-added measure derives from --hudscale, never from the raw
+     viewport. */
+  --hudscale: 1;
+  --band: 0px;
+  --topband: 0px;
+}
+
+/* No overlay sits in the transport band. #endscreen already lives inside
+   #board-wrap, a sibling ABOVE #transport, so it structurally cannot cover
+   it; this pins the rule even if the endcard is ever repositioned against
+   #stage. */
+#endscreen { bottom: var(--band, 0px); }
+
+/* Scrubber beats are labelled, clickable BUTTONS, one per emitted beat, with
+   CSS for every kind chorus emits. */
+.beat-marker {
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.beat-marker:focus-visible { outline: 1px solid var(--amber); outline-offset: 1px; }
+.beat-marker.bar {
+  top: 6px; height: 8px; width: 2px;
+  background: var(--tc, var(--paper-dim));
+}
+.beat-marker.edit {
+  top: 4px; height: 12px; width: 3px;
+  background: var(--tc, var(--paper-dim));
+  box-shadow: inset 0 4px 0 var(--stage-lo);
+}
+.beat-marker.turn {
+  top: 2px; height: 22px; width: 1px;
+  background: rgba(232, 163, 61, 0.55);
+}
+.beat-marker.end {
+  top: 2px; height: 14px; width: 3px;
+  background: var(--amber);
+}
+.beat-marker.start {
+  top: 6px; height: 8px; width: 2px;
+  background: var(--ghost);
+}
+
+/* The AUDIO toggle is a .tbtn inside the existing .tbar — in the band, never
+   overlaid on it. */
+#audio.tbtn { letter-spacing: 0.06em; white-space: nowrap; }
+#audio.tbtn:disabled { color: var(--ghost); cursor: default; }
+#audio.tbtn:disabled:hover { background: rgba(242, 232, 216, 0.08); }
+
+/* Grid legend: which colour is whose voice. */
+#chorus-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(10px * var(--hudscale, 1));
+  font-family: var(--pixfont);
+  font-size: calc(10px * var(--hudscale, 1));
+  letter-spacing: 0.1em;
+  color: var(--paper-dim);
+}
+.legend-item { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.legend-swatch {
+  width: calc(9px * var(--hudscale, 1));
+  height: calc(9px * var(--hudscale, 1));
+  background: var(--tc, var(--paper-dim));
+  flex: none;
+}
+
+/* The scorebug plate: the name is the one thing it must never lose. */
+.plate-name { flex: 1 1 auto; min-width: 3.2em; }
+.plate-score { font-variant-numeric: tabular-nums; }
+
+/* Endcard: rank, name, voice, credit, notes played, piece without you, and
+   the counterfactual audition button. */
+.end-rows.chorus-end-rows {
+  grid-template-columns: auto 1fr auto auto auto auto auto;
+  gap: 6px 14px;
+}
+.end-mute {
+  display: none;
+  font-family: var(--pixfont);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--paper);
+  background: rgba(242, 232, 216, 0.1);
+  border: none;
+  padding: 3px 7px;
+  cursor: pointer;
+  line-height: 1;
+  white-space: nowrap;
+}
+.end-mute:hover { background: rgba(242, 232, 216, 0.24); }
+/* Hidden entirely when audio is off or unavailable; the credit numbers are
+   always shown, audio or not. */
+body.audio-on .end-mute { display: inline-block; }
+.end-foot {
+  font-family: var(--finefont);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--ghost);
+  text-align: center;
+  margin-top: 14px;
+}
+
+/* Feed line colours for the chorus event vocabulary. */
+.feed-turn-line { color: var(--paper); font-weight: 600; }
+.feed-bar { color: var(--tc, var(--paper-dim)); }
+.feed-start { color: var(--paper-dim); }
+
+@media (max-width: 640px) {
+  /* Words are words: the voice tag goes, the name and the credit stay. */
+  .end-rows.chorus-end-rows { grid-template-columns: auto 1fr auto auto; }
+  .end-rows.chorus-end-rows .end-head:nth-child(5),
+  .end-rows.chorus-end-rows .end-head:nth-child(6),
+  .end-rows.chorus-end-rows .end-head:nth-child(7) { display: none; }
+  .end-rows.chorus-end-rows .end-cell:nth-child(7n + 5),
+  .end-rows.chorus-end-rows .end-cell:nth-child(7n + 6),
+  .end-rows.chorus-end-rows .end-cell:nth-child(7n) { display: none; }
+  .end-panel { min-width: 0; max-width: 94%; padding: 16px 14px 12px; }
+  #chorus-legend { gap: 7px; font-size: 9px; }
+}
+
+@media (max-width: 420px) {
+  .legend-text { display: none; }
+  #audio.tbtn { padding: 5px 7px; }
+}

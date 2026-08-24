@@ -1,0 +1,7 @@
+services:
+  chorus:
+    image: coworld-chorus:latest
+    platform: linux/amd64
+    build:
+      context: .
+      network: host

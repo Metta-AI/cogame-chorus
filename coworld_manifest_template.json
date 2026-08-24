@@ -1,0 +1,477 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Metta-AI/coworld/main/src/coworld/coworld_manifest_schema.json",
+  "tags": [
+    "music",
+    "co-creation",
+    "credit-assignment",
+    "turn-based",
+    "four-player",
+    "llm-driven",
+    "cooperative",
+    "sequencer"
+  ],
+  "game": {
+    "name": "chorus",
+    "replay_viewer": {
+      "bundle": "static-replay-viewer"
+    },
+    "description": "Chorus: four LLM-piloted cogs write ONE piece of music together on a 16-step sequencer. Each seat owns one voice - Bass, Tenor, Alto or Soprano - and the seat-to-voice assignment is a seeded permutation, redrawn every episode, so no policy can specialise on one register. The key, the mode, the tempo and a bar-by-bar chord plan are all drawn from the seed and revealed to everybody from turn 0. Every turn all four cogs write one bar at the same time, simultaneously and without seeing each other's choice: either the new bar, or a rewrite of one of their own earlier bars (a rewrite spends the turn, because the new bar just holds a copy of the last one). A bar is 16 integer tokens, -1 for a rest and 0..13 for a scale degree in that voice's register; every note lasts exactly one step. When the piece is finished a fixed, public, deterministic metric scores it out of 100: consonance (35%), voice leading (25%), rhythmic coherence (25%) and novelty against the same voice's earlier bars (15%). A seat's SCORE is a counterfactual: the piece as written minus the piece with every note of that seat's voice deleted. There is no vote and nobody judges anybody, so there is nothing to collude on - the only way to raise your score is to raise the piece by more than your absence would, and a voice that is rougher than the piece's average or that fills the grid until all four voices sound at once scores BELOW ZERO. The game is LLM-driven: every turn the server sends each seat's policy prompt plus its voice, the whole grid, the chord plan, the live score and its own credit to Claude as ONE parallel batch, so A POLICY IS JUST A PROMPT - build one by reusing the published player runnable and setting the PLAYER_PROMPT environment variable to your strategy. Two scripted baselines (arpeggio and pedal) play any seat that registers as scripted - and every seat when no LLM credentials are available, so episodes always complete.",
+    "owner": "daveey@gmail.com",
+    "runnable": {
+      "type": "game",
+      "image": "{{CHORUS_IMAGE}}",
+      "run": [
+        "/bin/chorus"
+      ],
+      "env": {
+        "ANTHROPIC_API_KEY_URI": "secret://coworld/chorus/anthropic_api_key"
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-chorus/tree/main"
+    },
+    "config_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tokens",
+        "players"
+      ],
+      "properties": {
+        "tokens": {
+          "description": "One connection token per player slot, indexed by slot.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "players": {
+          "description": "One player display-name object per seat, indexed by slot.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "num_agents": {
+          "description": "Seat count; injected by the commissioner. Chorus is a four-player game: four seats, four voices.",
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 4
+        },
+        "seed": {
+          "description": "Pins the seat-to-voice permutation, the key, the mode, the tempo, the chord plan and the seat aliases. Omit for a fresh random seed per episode.",
+          "type": "integer"
+        },
+        "bars": {
+          "description": "Bars in the piece, and therefore turns in the episode: every seat writes one bar per turn.",
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 16,
+          "default": 8
+        },
+        "talk": {
+          "description": "Whether seats may send one 100-character line a turn that all three other cogs read next turn (non-binding free text).",
+          "type": "boolean",
+          "default": true
+        },
+        "episodeTimeoutSeconds": {
+          "description": "Wall-clock the game assumes the platform allows an episode when COWORLD_TIMEOUT_SECONDS is not in its environment; play stops between turns at 60% of it so results and the replay always land.",
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 6000,
+          "default": 1200
+        },
+        "turnDelayMs": {
+          "description": "Spectator pacing delay between turns.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000,
+          "default": 400
+        },
+        "minTurnSpacingMs": {
+          "description": "Floor between consecutive LLM batch STARTS, in milliseconds. The hosted Bedrock sidecar caps 30 requests a minute per episode and a turn can issue 4 + 4; 20000 bounds the worst case at 24/min. Scripted-only turns never wait.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000,
+          "default": 20000
+        },
+        "model": {
+          "description": "Claude model for the direct-Anthropic transport (ANTHROPIC_API_KEY). Hosted Bedrock ignores this and rotates through its own haiku-first candidate list; set BEDROCK_MODEL to pin one.",
+          "type": "string",
+          "default": "claude-sonnet-5"
+        },
+        "maxOutputTokens": {
+          "type": "integer",
+          "minimum": 64,
+          "maximum": 2000,
+          "default": 900
+        },
+        "llmTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 300,
+          "default": 30
+        },
+        "player_connect_timeout_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "default": 180
+        }
+      }
+    },
+    "results_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "names",
+        "scores",
+        "voices",
+        "onsets",
+        "piece",
+        "consonance",
+        "leading",
+        "rhythm",
+        "novelty",
+        "key",
+        "bpm",
+        "bars",
+        "maxBars",
+        "reason"
+      ],
+      "properties": {
+        "names": {
+          "description": "Policy display names, indexed by slot. Seats play under anonymous cog aliases in-game; results attribute by policy name.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "string"
+          }
+        },
+        "scores": {
+          "description": "The seat's counterfactual credit: the piece as written minus the piece with that seat's voice deleted. Signed; higher is better. Credits do not sum to `piece`.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "number",
+            "minimum": -100,
+            "maximum": 100
+          }
+        },
+        "voices": {
+          "description": "The voice each seat wrote: Bass, Tenor, Alto or Soprano.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "string"
+          }
+        },
+        "onsets": {
+          "description": "Notes the seat actually played over the bars scored.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "piece": {
+          "description": "The shared piece score out of 100 over the bars actually written.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "consonance": {
+          "description": "Consonance component, 0..1 (weight 0.35).",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "leading": {
+          "description": "Voice-leading component, 0..1 (weight 0.25).",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "rhythm": {
+          "description": "Rhythmic-coherence component, 0..1 (weight 0.25).",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "novelty": {
+          "description": "Novelty component, 0..1 (weight 0.15).",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "key": {
+          "description": "The episode's key and mode, e.g. \"C dorian\".",
+          "type": "string"
+        },
+        "bpm": {
+          "description": "The episode's tempo.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "bars": {
+          "description": "Bars actually written (turns resolved).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxBars": {
+          "description": "The episode's bar count after budget fitting.",
+          "type": "integer",
+          "minimum": 4
+        },
+        "reason": {
+          "description": "How the episode ended: complete (all bars written) or deadline (episode clock; the piece is scored on the bars actually written).",
+          "type": "string"
+        }
+      }
+    },
+    "protocols": {
+      "player": {
+        "type": "text",
+        "value": "chorus.player.v1 - JSON text frames over the websocket named by COWORLD_PLAYER_WS_URL (already carrying ?slot=N&token=T). A Chorus policy is a prompt: the player container's only job is to deliver it; the game server makes every decision by sending that prompt plus the seat's voice, the complete grid, the chord plan, the live piece score, the seat's own counterfactual credit, the other seats' messages and its private notes to Claude once a turn, as one parallel batch for all seats. game->player frames: {\"type\":\"welcome\",\"protocol\":\"chorus.player.v1\",\"slot\":N,\"name\":str,\"voice\":str,\"base\":int,\"bars\":int,\"steps\":16,\"key\":str,\"mode\":str,\"bpm\":int} on connect; {\"type\":\"state\",\"slot\":N,\"name\":str,\"voice\":str,\"seat\":{voice,voiceName,base,score,onsets,bars:[[16 tokens] per bar],notes},\"piece\":float,\"turn\":int,\"turns\":int,\"turnsPlayed\":int,\"started\":bool,\"done\":bool,\"reason\":str} after every event - redacted to the seat's OWN voice, its OWN counterfactual credit and the shared piece score (the other seats' credits and notes are not in it; decisions are server-side so this costs the policy nothing); {\"type\":\"final\",\"done\":true,\"scores\":[4 credits],\"voices\":[4],\"names\":[4 table aliases],\"piece\":float,\"bars\":int,\"reason\":str,\"slot\":N} at episode end, after which the player should exit. player->game frames: {\"type\":\"prompt\",\"prompt\":str,\"scripted\":str} - the prompt (max 4000 runes) is the policy, sent right after connecting and again after welcome; scripted \"arpeggio\" (or \"1\"/\"true\"/\"yes\") plays the built-in arpeggio baseline for that seat, \"pedal\" the thin pedal baseline, \"\" means LLM-driven. The reference player reads PLAYER_PROMPT and PLAYER_SCRIPTED from its environment and exits 0 when the socket closes."
+      },
+      "global": {
+        "type": "text",
+        "value": "Global spectators connect a websocket to /global and receive the full snapshot as JSON after EVERY event: {\"type\":\"state\",\"game\":\"chorus\",\"seats\":[{name,seat,voice,voiceName,base,score,onsets,bars:[[16 tokens] per bar],say,heard:[{seat,say}],notes,pending,lastTarget,lastEdit} x4 by SEAT],\"voiceSeat\":[4 seat indexes by voice],\"grid\":[4 voices][bars][16 steps],\"chords\":[one chord-root degree per bar],\"chordNames\":[roman numerals],\"key\":str,\"mode\":str,\"bpm\":int,\"steps\":16,\"turn\":int,\"turns\":int,\"turnsPlayed\":int,\"piece\":float,\"parts\":{consonance,leading,rhythm,novelty},\"credits\":[4 signed floats by seat],\"history\":[{turn,piece,credits} per resolved turn],\"phase\":bars|done,\"gameDone\":bool,\"reason\":str,\"policyNames\":[...],\"events\":[{kind:start|turn|bar|end,...}],\"started\":bool,\"done\":bool,\"connected\":[bool]}. Voices are 0 Bass, 1 Tenor, 2 Alto, 3 Soprano; seats are indexed by slot and mapped to voices through voiceSeat. The events array is the complete append-only transcript: one start, one turn event per opened turn plus one final turn event, four bar events per turn, and one end event. A seat's own frames carry only its own credit, while spectators see all four here and the endcard reveals them. The browser page at /client/global renders the sequencer live; /client/replay plays a recorded episode; the static replay-viewer bundle renders replays hosted by the platform (index.html?replay=<url>)."
+      }
+    },
+    "docs": {
+      "readme": {
+        "type": "text",
+        "value": "Chorus is co-composition for four LLM-piloted cogs. Each seat owns one voice - Bass, Tenor, Alto or Soprano, dealt from the seed - of one piece of music on a 16-step sequencer. Every turn all four write one bar at the same time, either the new bar or a rewrite of one of their own earlier bars, and everybody can see the whole grid, the key, the tempo and the bar-by-bar chord plan from the first turn. When the piece is done a fixed, public, deterministic metric scores it out of 100 - consonance 35%, voice leading 25%, rhythm 25%, novelty against your own earlier bars 15% - and each seat's score is a COUNTERFACTUAL: the piece as written minus the piece with every note of that seat's voice deleted. There is no vote and nobody judges anybody; a voice that is rougher than the piece's average, or that fills the grid until all four voices sound at once, can score below zero. Credits are leave-one-out differences and do NOT sum to the piece score. A policy is just a prompt: field one by reusing the published chorus-player runnable with PLAYER_PROMPT set to your strategy. Two scripted baselines ship in the same image - arpeggio (chord tones spread across the voices, rotated each bar) and pedal (a thin root drone) - selected with PLAYER_SCRIPTED; they also play every seat when no LLM credentials are available, so episodes always complete."
+      },
+      "pages": [
+        {
+          "id": "rules.md",
+          "title": "rules.md",
+          "content": {
+            "type": "text",
+            "value": "# Chorus rules\n\n## Seats and voices\n\n- Four seats, four voices: 0 Bass (base MIDI 36), 1 Tenor (48), 2 Alto (60), 3 Soprano (72).\n- The seat-to-voice assignment is a **seeded permutation**, redrawn every episode. This is the\n  cross-author seating the game is built on: a policy cannot specialise on one register across a\n  league round, and the same four policies re-seated write a different piece.\n- Nobody else can write a note in your voice and you cannot write a note in theirs.\n\n## The piece\n\n- `bars` bars (default 8, range 4..16). Every bar is exactly **16 steps**.\n- Key: a root pitch class drawn from C, D, E-flat, F, G, A.\n- Mode: one of ionian, dorian, aeolian, mixolydian.\n- Tempo: 84, 90, 96, 102 or 108 BPM.\n- Chord plan: one chord per bar, from one of four progressions tiled across the piece\n  (I IV V I / I vi IV V / I V vi IV / vi IV I V). The chord tones of a chord rooted on degree r are\n  r, r+2 and r+4. **The whole plan is public from turn 0** - it is the shared score sheet.\n- All of it is drawn from the seed, so a replay re-derives everything from the seed alone.\n\n## Notation\n\nA bar is 16 integer tokens, one per step:\n\n- `-1` is a **rest**.\n- `0..13` is a **scale degree**: 0 the tonic, 6 the seventh, 7 the tonic an octave up, 13 the\n  seventh two octaves up. `midi = base + 12 * (d div 7) + scale[d mod 7]`, where `base` is your\n  voice's base MIDI note in the episode's key; every legal token lands in `base .. base+23`.\n- Every note lasts **exactly one step**. There are no ties, sustains, velocities or rests of\n  length. A step is an onset if and only if its token is at least 0.\n\n## A turn, in order\n\nThere are exactly `bars` turns, one per bar. Turn `t`:\n\n1. **Open.** Every voice HOLDS its previous bar (`grid[v][t] := grid[v][t-1]`, or 16 rests at\n   `t = 0`). Last turn's messages become this turn's `heard`.\n2. **Observe.** Each seat is shown its voice, the complete grid, the whole chord plan, the live\n   piece score and its four components, its OWN counterfactual credit, the other seats' lines from\n   last turn, its private notes, and the exact list of legal targets.\n3. **Decide.** All seats decide **simultaneously**; nobody sees another seat's bar for this turn\n   until it resolves. All the LLM calls go out as one parallel batch.\n4. **Validate.** A reply that times out, fails to parse or is illegal is retried once with an\n   explicit hint; a seat still open after that plays the `arpeggio` baseline, which is legal by\n   construction.\n5. **Apply**, in seat order. `target` must satisfy `0 <= target <= t` and `steps` must be exactly\n   16 tokens, each `-1` or `0..13`. Each seat writes only its own voice, so the resulting grid is\n   order-independent.\n6. **Resolve** once all four bars are in.\n\n## Hold versus edit\n\n`target = t` writes the new bar. `target < t` **rewrites one of your own earlier bars**, and the\nhold at `grid[v][t]` stands unchanged - spending the turn on the past costs you the new bar. That\nis the whole trade: repair a weak early bar, or add a new one.\n\n## Caps\n\n| field | rule | cap |\n|---|---|---|\n| `target` | `0 <= target <= t`; a MISSING target defaults to `t` | - |\n| `steps` | array of exactly 16 integers, each `-1` or `0..13` | 16 |\n| `say` | one line all three other cogs read next turn; forced to `\"\"` when talk is off | 100 runes |\n| `notes` | private, fed back to you verbatim next turn | 600 runes |\n\n`steps` is also accepted as a string of 16 whitespace- or comma-separated tokens where `.`, `-`,\n`r`, `R` and `rest` all mean a rest; floats are rounded and numeric strings are accepted. Every\nstring that reaches the replay is truncated on **rune** boundaries.\n\n## What is hidden\n\nAlmost nothing. The metric, its weights, the chord plan, the key, the tempo and the whole grid are\npublic by design - this is co-composition against a known ruler, not a guessing game. Hidden from a\nseat: the other seats' credits, the other seats' private notes, the other seats' move for the\ncurrent turn, and every policy display name (seats know each other only as cog aliases).\n\n## Endings\n\n| `reason` | when | scoring |\n|---|---|---|\n| `complete` | all `bars` turns resolved | over all `bars` bars |\n| `deadline` | the play deadline was crossed between turns | over the bars actually written, which is always a well-formed piece |\n\nThere is no third path. An episode never ends because a seat disconnected (its bars simply hold),\nnever because the LLM is unavailable (the scripted fallback plays), and never mid-turn.\n"
+          }
+        },
+        {
+          "id": "scoring.md",
+          "title": "scoring.md",
+          "content": {
+            "type": "text",
+            "value": "# Chorus scoring\n\nOne function scores the first `n` bars of a grid. It is deterministic, public, and it is the ONLY\nscoring path in the game - the live scoreboard, the results, the replay check and the\ncounterfactual all call it.\n\n> **`S = 100 x (0.35*C + 0.25*V + 0.25*R + 0.15*N)`, in `[0, 100]`. Higher is better.**\n\nEach component is clamped to `[0, 1]` on its own.\n\n## C - consonance (weight 0.35)\n\nOver every *sounding pair*: every (bar, step) and every voice pair `u < v` with both tokens at\nleast 0. Interval class `ic = |midi(u) - midi(v)| mod 12`, weighted:\n\n| `ic` | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| `w` | 0.6 | 0.0 | 0.3 | 1.0 | 1.0 | 0.7 | 0.1 | 1.0 | 0.9 | 0.9 | 0.3 | 0.0 |\n\n`C` is the mean of `w` over all sounding pairs, and **`C = 0` when there are none** - silence is\nnot consonance.\n\n*Worked example:* a bar where Bass holds degree 0 and Alto holds degree 4 on the same four steps\ngives four sounding pairs, each a perfect fifth (`ic = 7`, `w = 1.0`), so `C = 1.0`. Move the Alto\nto degree 1 and every pair becomes a minor second (`ic = 1`, `w = 0.0`) and `C = 0.0`.\n\n## V - voice leading (weight 0.25)\n\nFor each voice, take its sounding notes in time order across the whole span (rests skipped, bars\nconcatenated). For each consecutive pair, `L = |delta midi|`:\n\n| `L` | 0-2 | 3-4 | 5-7 | 8-12 | >12 |\n|---|---|---|---|---|---|\n| motion score | 1.00 | 0.85 | 0.60 | 0.30 | 0.00 |\n\n`Vraw` is the mean over all motions in all voices (0 when there are none).\n\n**Parallel-perfect penalty.** For each voice pair `u < v` and each consecutive global step index\n`i, i+1` where all four of `(u,i) (v,i) (u,i+1) (v,i+1)` sound and BOTH voices move, the pair is\n*eligible*; it is *parallel* when `ic(i) == ic(i+1)` and `ic(i)` is 0 or 7. With\n`p = parallel / eligible`:\n\n> **`V = Vraw x (1 - 0.5 x p)`**\n\n*Worked example:* a single voice moving only by one or two scale steps scores `V = 1.0`. Two voices\nmoving together in fifths through a whole bar have `p = 1`, so `V` is exactly halved.\n\n## R - rhythmic coherence (weight 0.25)\n\nThree parts.\n\n- **Pulse `Ra`** - per onset, by its step index `k` inside the bar: `k` in {0,4,8,12} scores 1.0,\n  {2,6,10,14} scores 0.7, odd `k` scores 0.4. `Ra` is the mean over all onsets (0 when there are\n  none).\n- **Density `Rb`** - `density = onsets / (n * 16 * 4)`. The denominator is **always four voices**,\n  in the counterfactual too. `Rb = 1` for density in `[0.20, 0.55]`; it rises linearly 0 to 1\n  across `[0.05, 0.20]`, falls linearly 1 to 0 across `[0.55, 0.85]`, and is 0 outside\n  `[0.05, 0.85]`.\n- **Interlock `Rc`** - the fraction of the `n * 16` step-columns in which the number of\n  simultaneous onsets is 1, 2 or 3 - not 0 and not 4.\n\n> **`R = 0.40*Ra + 0.35*Rb + 0.25*Rc`**\n\n## N - novelty against your own earlier bars (weight 0.15)\n\nFor each voice `v` and each bar `b >= 1`: `sim(v,b)` is the largest number of positions in which\n`grid[v][b]` agrees with any earlier bar of the same voice, divided by 16 (rests match rests).\n`d = 1 - sim`, and `raw` is the mean of `d` over all voices and all bars `b >= 1` (`raw = 0.5` when\nthere is only one bar).\n\n> **`N = max(0, 1 - 2 * |raw - 0.5|)`**\n\nThe target is that about **half** of a bar differs from its closest earlier sibling. Pure\nrepetition (`raw = 0`) scores 0 - and so does never repeating anything (`raw = 1`). Unbounded\nnovelty is noise; a peak at half-change is the musically honest reading.\n\nAn all-rest grid scores exactly `0.0`: `C = 0`, `V = 0`, every rhythm term 0, and `raw = 0` so\n`N = 0`.\n\n## Your score: the counterfactual\n\n`mute(grid, v)` is the grid with every token of voice `v` replaced by a rest.\n\n> **`credit(seat) = pieceScore(grid, n) - pieceScore(mute(grid, voiceOf[seat]), n)`**\n\nBoth sides call the identical function with no special cases. A muted voice's bars are still bars\n(they count in the novelty mean, where 16 repeated rests match perfectly and pull `raw` down),\nstill columns (where they lower the interlock count), and still four voices in the density\ndenominator. That uniformity is the whole rule.\n\n- **Higher is better.** A credit is a difference of two scores in `[0, 100]`, so it lies in\n  `[-100, +100]`; in practice it sits in roughly `[-25, +25]`.\n- **Credit is genuinely signed.** `C` is a *mean* over sounding pairs, so a voice less consonant\n  than the piece's running average LOWERS `C` and earns a negative credit - deleting it would\n  improve the piece. A voice that hammers every step pushes the interlock term toward the\n  four-voice case and the density term past 0.55, and can also go negative. Prompts have to earn\n  their seat.\n- **Credits do NOT sum to the piece score.** Leave-one-out is not an exact decomposition, and\n  nothing in the game pretends otherwise. `piece` is reported alongside as the shared, cooperative\n  number.\n\n## What the league ranks\n\n`results.scores[i]` is `credit(i)`, rounded to six decimals, and the league ranks on the mean\nepisode score across a division's episodes - higher is better. `piece` is reported but does not\nrank anybody.\n"
+          }
+        }
+      ]
+    }
+  },
+  "player": [
+    {
+      "id": "chorus-player",
+      "name": "Chorus Prompt Player",
+      "type": "player",
+      "description": "The reference Chorus policy: delivers its PLAYER_PROMPT (or a default composition strategy in words) to the game and spectates until the final frame. Every decision is made server-side by Claude from that prompt. Field your own policy by uploading this same image with a different PLAYER_PROMPT.",
+      "image": "{{CHORUS_IMAGE}}",
+      "run": [
+        "/bin/chorus-player"
+      ],
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-chorus/tree/main"
+    },
+    {
+      "id": "chorus-arpeggio",
+      "name": "Chorus Arpeggio Baseline",
+      "type": "player",
+      "description": "The scripted arpeggio baseline as a fieldable policy: chord tones spread across the four voices on complementary steps and rotated a place each bar, so the grid stays inside the density band and off the repetition floor. Registers its seat as rule-based; the game server plays it deterministically, no LLM involved. It is also the fallback for any seat whose reply fails twice.",
+      "image": "{{CHORUS_IMAGE}}",
+      "run": [
+        "/bin/chorus-player"
+      ],
+      "env": {
+        "PLAYER_SCRIPTED": "arpeggio"
+      },
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-chorus/tree/main"
+    },
+    {
+      "id": "chorus-pedal",
+      "name": "Chorus Pedal Baseline",
+      "type": "player",
+      "description": "The scripted pedal baseline: the chord root on the downbeat and a fifth halfway through the odd bars, nothing else. Always legal, never edits, never talks - and far too thin to sit in the density band, so it is the partner a real prompt should beat comfortably.",
+      "image": "{{CHORUS_IMAGE}}",
+      "run": [
+        "/bin/chorus-player"
+      ],
+      "env": {
+        "PLAYER_SCRIPTED": "pedal"
+      },
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-chorus/tree/main"
+    }
+  ],
+  "variants": [
+    {
+      "id": "standard",
+      "name": "Standard piece",
+      "description": "Four cogs, eight bars, talk on.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          },
+          {
+            "name": "Player3"
+          },
+          {
+            "name": "Player4"
+          }
+        ],
+        "num_agents": 4,
+        "bars": 8,
+        "talk": true,
+        "turnDelayMs": 400,
+        "minTurnSpacingMs": 20000,
+        "player_connect_timeout_seconds": 180
+      }
+    },
+    {
+      "id": "long-form",
+      "name": "Long form",
+      "description": "Ten bars - more room to develop a motif.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          },
+          {
+            "name": "Player3"
+          },
+          {
+            "name": "Player4"
+          }
+        ],
+        "num_agents": 4,
+        "bars": 10,
+        "talk": true,
+        "turnDelayMs": 400,
+        "minTurnSpacingMs": 20000,
+        "player_connect_timeout_seconds": 180
+      }
+    },
+    {
+      "id": "no-talk",
+      "name": "No talk",
+      "description": "Eight bars, no messages - coordinate through the grid alone.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          },
+          {
+            "name": "Player3"
+          },
+          {
+            "name": "Player4"
+          }
+        ],
+        "num_agents": 4,
+        "bars": 8,
+        "talk": false,
+        "turnDelayMs": 400,
+        "minTurnSpacingMs": 20000,
+        "player_connect_timeout_seconds": 180
+      }
+    }
+  ],
+  "certification": {
+    "game_config": {
+      "players": [
+        {
+          "name": "Sprocket"
+        },
+        {
+          "name": "Gizmo"
+        },
+        {
+          "name": "Ratchet"
+        },
+        {
+          "name": "Widget"
+        }
+      ],
+      "num_agents": 4,
+      "seed": 5,
+      "bars": 6,
+      "talk": true,
+      "turnDelayMs": 0,
+      "minTurnSpacingMs": 0,
+      "player_connect_timeout_seconds": 180
+    },
+    "players": [
+      {
+        "player_id": "chorus-player"
+      },
+      {
+        "player_id": "chorus-arpeggio"
+      },
+      {
+        "player_id": "chorus-player"
+      },
+      {
+        "player_id": "chorus-pedal"
+      }
+    ]
+  },
+  "episode_timeout_minutes": 20
+}

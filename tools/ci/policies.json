@@ -1,0 +1,31 @@
+[
+  {
+    "name": "chorus-cantor",
+    "run": "/bin/chorus-player",
+    "env": {
+      "PLAYER_PROMPT": "You own one voice of a four-voice piece and your score is the piece with your voice minus the piece without it, so every bar has to pay for itself. Build a MOTIF in your first bar and keep it written down in your notes: the exact 16 tokens, and which steps carry it. Put your onsets on steps 0, 4, 8 and 12 first; use 2, 6, 10 and 14 for the answer and the odd steps only as passing notes. On every strong step play a chord tone of THIS bar's chord (the degrees r, r+2 and r+4 printed in the chord plan) and let the weak steps be neighbours a step above or below it. Move by one or two scale degrees whenever you can and never leap more than an octave; if you must leap, come back the other way on the next note. Each new bar, restate about half your motif exactly and change the other half - transpose it to the new chord, rotate it, or invert one leap. Never repeat a bar unchanged and never write a bar with nothing of the motif in it. Aim for five to eight notes a bar: enough to be heard, few enough that the grid never has all four voices sounding on the same step. Say one short honest line about which steps you are claiming next bar."
+    }
+  },
+  {
+    "name": "chorus-weaver",
+    "run": "/bin/chorus-player",
+    "env": {
+      "PLAYER_PROMPT": "You own one voice and you are scored on what the piece would lose without you, so play the gaps rather than the middle. Before writing anything, read the whole grid column by column and count how many voices already sound on each of the 16 steps: rest on every step where three voices already sound, and take the steps where one or none do - that is where a note is worth the most, because the metric rewards columns with one to three voices sounding, never four and never zero. Keep your own density near a quarter of the bar; a voice that hammers every step drives the whole grid past the density band and earns a NEGATIVE credit. Choose the pitch that is consonant against whatever is already sounding in that column: a third, a fifth or a sixth against the nearest other voice, never a second, a seventh or a tritone, and never move in parallel with another voice through two fifths or two octaves in a row. Watch the score strip: whenever the piece score is flat or falling, spend the turn REWRITING your weakest earlier bar - the one with the most collisions or the thinnest line - instead of adding a new one, and say which bar you are repairing so the others leave it alone."
+    },
+    "player": "ply_bac48eb1-662e-44f8-973d-f3e016dccf5d"
+  },
+  {
+    "name": "chorus-arpeggio",
+    "run": "/bin/chorus-player",
+    "env": {
+      "PLAYER_SCRIPTED": "arpeggio"
+    }
+  },
+  {
+    "name": "chorus-pedal",
+    "run": "/bin/chorus-player",
+    "env": {
+      "PLAYER_SCRIPTED": "pedal"
+    }
+  }
+]
