@@ -115,12 +115,15 @@
       scorebug: document.getElementById("scorebug"),
       endscreen: document.getElementById("endscreen"),
       assetBase: "./assets",
-      payload: payload
-    });
-    // The renderer draws on its own animation frame; report ready one frame
-    // later so "ready" means a picture, not merely a parsed payload.
-    window.requestAnimationFrame(function () {
-      window.requestAnimationFrame(function () { tell("ready"); });
+      payload: payload,
+      // `ready` has to mean a picture, so it is raised by the renderer's own
+      // callback -- after the first frame is drawn, the clock and scorebug
+      // carry the replay, the scrub is wired and data-replay-loaded is set.
+      // Timing it from here instead (two animation frames after this call)
+      // fires while makeRenderer is still waiting on loadImages, and a host
+      // that samples on `ready` reads the untouched shell: "BAR 0", an empty
+      // scorebug and a dead scrubber.
+      onLoaded: function () { tell("ready"); }
     });
   }
 

@@ -1242,7 +1242,13 @@
 
   function attachReplay(options) {
     // options: {canvas, feed, scrub, playButton, audioButton, label, clock,
-    //           scorebug, endscreen, assetBase, payload}
+    //           scorebug, endscreen, assetBase, payload, onLoaded}
+    // onLoaded (optional) runs once, immediately after the first frame is
+    // drawn and data-replay-loaded is set -- i.e. once the clock, scorebug
+    // and scrub really carry the replay. A host that samples the viewer on
+    // that signal must not see the untouched shell, so it cannot be raised
+    // from the call site: makeRenderer waits on loadImages, which can take
+    // more than a second.
     var payload = options.payload;
     var events = payload.events || [];
     var states = payload.states || [];
@@ -1337,6 +1343,7 @@
       })(0);
 
       document.documentElement.setAttribute("data-replay-loaded", "true");
+      if (options.onLoaded) options.onLoaded();
     });
   }
 
