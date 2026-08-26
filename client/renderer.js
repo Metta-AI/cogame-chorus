@@ -375,20 +375,28 @@
     ctx.restore();
   }
 
-  // A vertical amber sweep. During playback it walks the bar being read at
-  // 60 / bpm / 4 seconds a step; between events it rests on the live bar.
+  // A vertical amber sweep. While audio plays it sits exactly on the note
+  // being heard (the AudioContext clock is the truth); otherwise it walks
+  // the bar being read at 60 / bpm / 4 seconds a step, resting on the live
+  // bar between events.
   function drawPlayhead(ctx, L, view, now, bars, firstBar, shownBars) {
     var fx = view.effects || {};
-    var liveBar = Math.min(view.turn || 0, Math.max(bars - 1, 0));
-    if (liveBar < firstBar || liveBar >= firstBar + shownBars) return;
-    var bpm = view.bpm || 96;
-    var stepMs = 60000 / bpm / 4;
-    var step = 0;
-    if (typeof fx.turnAt === "number") {
-      step = Math.floor((now - fx.turnAt) / stepMs) % STEP_COUNT;
-      if (step < 0) step = 0;
+    var bar, step;
+    if (view.audioPos) {
+      bar = view.audioPos.bar;
+      step = view.audioPos.step;
+    } else {
+      bar = Math.min(view.turn || 0, Math.max(bars - 1, 0));
+      var bpm = view.bpm || 96;
+      var stepMs = 60000 / bpm / 4;
+      step = 0;
+      if (typeof fx.turnAt === "number") {
+        step = Math.floor((now - fx.turnAt) / stepMs) % STEP_COUNT;
+        if (step < 0) step = 0;
+      }
     }
-    var x = L.x0 + ((liveBar - firstBar) * STEP_COUNT + step) * L.colW;
+    if (bar < firstBar || bar >= firstBar + shownBars) return;
+    var x = L.x0 + ((bar - firstBar) * STEP_COUNT + step) * L.colW;
     ctx.save();
     ctx.strokeStyle = C.rgba(C.AMBER, 0.85);
     ctx.lineWidth = 2;
@@ -425,12 +433,17 @@
         }
       }
     }
-    var live = Math.min(view.turn || 0, Math.max(bars - 1, 0));
+    // The marker follows the sound when audio plays (the compact main view
+    // shows only the live bar, so this strip is where a looping playhead
+    // stays visible); otherwise it sits on the live bar.
+    var mark = view.audioPos ?
+      view.audioPos.bar * STEP_COUNT + view.audioPos.step :
+      Math.min(view.turn || 0, Math.max(bars - 1, 0)) * STEP_COUNT;
     ctx.strokeStyle = C.rgba(C.AMBER, 0.9);
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(t.x + live * STEP_COUNT * colW, t.y);
-    ctx.lineTo(t.x + live * STEP_COUNT * colW, t.y + t.h);
+    ctx.moveTo(t.x + mark * colW, t.y);
+    ctx.lineTo(t.x + mark * colW, t.y + t.h);
     ctx.stroke();
     ctx.restore();
   }
@@ -558,13 +571,27 @@
   // until the ♪ AUDIO button is clicked (the user gesture browser autoplay
   // policy requires), fully fenced in try/catch, and it NEVER gates
   // data-replay-loaded or touches the render loop.
+  //
+  // Two ways to sound:
+  //   loop(getState, muteVoice) — the replay soundtrack. Schedules one bar
+  //     at a time, ~one bar ahead of the clock, re-reading getState() at
+  //     every bar boundary, so the piece is heard exactly as far as it has
+  //     been written: new bars join as the cogs write them, edits apply,
+  //     seeks are followed, and the loop wraps back to bar 0 after the last
+  //     written bar. An empty grid is a silent — but still armed — loop.
+  //   once(state, muteVoice, onDone) — a single pass over a fixed state;
+  //     the endcard's PLAY WITHOUT buttons use it for the counterfactual.
+  // position() reports the {bar, step} sounding right now, from the
+  // AudioContext clock, so the playhead can sweep in sync with the sound.
   function makeChorusAudio() {
     var audio = null;
     var master = null;
-    var timers = [];
-    var nodes = [];
     var available = true;
-    var playing = false;
+    var mode = null;          // null | "loop" | "once"
+    var timer = null;
+    var nodes = [];           // [{node, until}]
+    var sounding = [];        // the last two scheduled bars: {bar,start,stepDur}
+    var LOOKAHEAD = 0.18;
 
     function ensure() {
       if (audio) return audio;
@@ -581,11 +608,14 @@
     }
 
     function stop() {
-      playing = false;
-      timers.forEach(function (t) { window.clearTimeout(t); });
-      timers = [];
+      mode = null;
+      sounding = [];
+      if (timer) {
+        window.clearTimeout(timer);
+        timer = null;
+      }
       nodes.forEach(function (n) {
-        try { n.stop(); } catch (ignore) {}
+        try { n.node.stop(); } catch (ignore) {}
       });
       nodes = [];
     }
@@ -602,67 +632,113 @@
       gain.connect(master.__comp);
       osc.start(at);
       osc.stop(at + Math.max(dur, 0.14));
-      nodes.push(osc);
+      nodes.push({ node: osc, until: at + Math.max(dur, 0.14) });
+    }
+
+    function scheduleBar(state, bar, at, stepDur, muteVoice) {
+      var grid = state.grid || [];
+      var seats = state.seats || [];
+      var voiceSeat = state.voiceSeat || [0, 1, 2, 3];
+      var scaleMode = state.mode || "ionian";
+      for (var v = 0; v < 4; v++) {
+        if (v === muteVoice) continue;
+        var seat = seats[voiceSeat[v]] || {};
+        var base = typeof seat.base === "number" ? seat.base :
+          [36, 48, 60, 72][v];
+        var source = (grid[v] || [])[bar] || [];
+        for (var s = 0; s < STEP_COUNT; s++) {
+          if (typeof source[s] !== "number" || source[s] < 0) continue;
+          note(v, midiHz(tokenMidi(base, scaleMode, source[s])),
+            at + s * stepDur, stepDur);
+        }
+      }
+    }
+
+    // Bars with real content: while writing, bars 0..turn (the forming bar
+    // included); when done, the bars actually played (a deadline episode's
+    // grid is longer than its piece).
+    function writtenBars(state) {
+      var allocated = ((state.grid || [])[0] || []).length || 1;
+      var written = state.gameDone ? (state.turnsPlayed || allocated) :
+        (state.turn || 0) + 1;
+      return Math.max(1, Math.min(written, allocated));
+    }
+
+    function start(nextMode, source, muteVoice, onDone) {
+      if (!available) return;
+      try {
+        ensure();
+        if (audio.state === "suspended") audio.resume();
+      } catch (error) {
+        available = false;
+        return;
+      }
+      stop();
+      mode = nextMode;
+      var bar = 0;
+      var barAt = audio.currentTime + 0.1;
+
+      function tick() {
+        if (mode !== nextMode) return;
+        var now = audio.currentTime;
+        nodes = nodes.filter(function (n) { return n.until > now; });
+        var stepDur;
+        try {
+          var state = typeof source === "function" ? source() : source;
+          if (!state) {
+            stop();
+            return;
+          }
+          var span = writtenBars(state);
+          if (bar >= span) {
+            if (nextMode === "once") {
+              timer = window.setTimeout(function () {
+                if (mode !== nextMode) return;
+                stop();
+                if (onDone) onDone();
+              }, Math.max(0, barAt - now) * 1000 + 300);
+              return;
+            }
+            bar = 0;
+          }
+          stepDur = 60 / (state.bpm || 96) / 4;
+          scheduleBar(state, bar, barAt, stepDur, muteVoice);
+          sounding.push({ bar: bar, start: barAt, stepDur: stepDur });
+          if (sounding.length > 2) sounding.shift();
+        } catch (error) {
+          available = false;
+          stop();
+          return;
+        }
+        bar += 1;
+        barAt += STEP_COUNT * stepDur;
+        timer = window.setTimeout(tick,
+          Math.max(30, (barAt - audio.currentTime - LOOKAHEAD) * 1000));
+      }
+      tick();
     }
 
     return {
       available: function () { return available; },
-      playing: function () { return playing; },
+      playing: function () { return mode !== null; },
       stop: stop,
-      // Schedules at most ONE bar ahead; a seek or a STOP cancels every
-      // scheduled node.
-      play: function (state, muteVoice, onDone) {
-        if (!available) return;
-        try {
-          ensure();
-          if (audio.state === "suspended") audio.resume();
-        } catch (error) {
-          available = false;
-          return;
-        }
-        stop();
-        playing = true;
-        var grid = state.grid || [];
-        var seats = state.seats || [];
-        var voiceSeat = state.voiceSeat || [0, 1, 2, 3];
-        var mode = state.mode || "ionian";
-        var bars = (grid[0] || []).length;
-        var stepDur = 60 / (state.bpm || 96) / 4;
-        var startAt = audio.currentTime + 0.08;
-
-        function scheduleBar(bar) {
-          if (!playing || bar >= bars) {
-            if (playing && onDone) {
-              timers.push(window.setTimeout(function () {
-                playing = false;
-                onDone();
-              }, 400));
-            }
-            return;
+      loop: function (getState, muteVoice) {
+        start("loop", getState, muteVoice, null);
+      },
+      once: function (state, muteVoice, onDone) {
+        start("once", state, muteVoice, onDone);
+      },
+      position: function () {
+        if (!mode || !audio) return null;
+        var now = audio.currentTime;
+        for (var i = sounding.length - 1; i >= 0; i--) {
+          var b = sounding[i];
+          if (now >= b.start && now < b.start + STEP_COUNT * b.stepDur) {
+            return { bar: b.bar, step: Math.min(STEP_COUNT - 1,
+              Math.floor((now - b.start) / b.stepDur)) };
           }
-          try {
-            for (var v = 0; v < 4; v++) {
-              if (v === muteVoice) continue;
-              var seat = seats[voiceSeat[v]] || {};
-              var base = typeof seat.base === "number" ? seat.base :
-                [36, 48, 60, 72][v];
-              var source = (grid[v] || [])[bar] || [];
-              for (var s = 0; s < STEP_COUNT; s++) {
-                if (source[s] < 0 || typeof source[s] !== "number") continue;
-                note(v, midiHz(tokenMidi(base, mode, source[s])),
-                  startAt + (bar * STEP_COUNT + s) * stepDur, stepDur);
-              }
-            }
-          } catch (error) {
-            available = false;
-            stop();
-            return;
-          }
-          timers.push(window.setTimeout(function () {
-            scheduleBar(bar + 1);
-          }, Math.max(50, STEP_COUNT * stepDur * 1000 * 0.7)));
         }
-        scheduleBar(0);
+        return null;
       }
     };
   }
@@ -672,6 +748,7 @@
     var on = false;
     function label() {
       if (!audio.available()) {
+        on = false;
         button.textContent = "♪ AUDIO N/A";
         button.disabled = true;
         button.classList.remove("on");
@@ -682,18 +759,22 @@
       button.classList.toggle("on", on);
       document.body.classList.toggle("audio-on", on);
     }
+    function arm() {
+      audio.loop(getState, -1);
+      label();
+    }
     button.onclick = function () {
       on = !on;
-      if (!on) {
-        audio.stop();
-      } else {
-        var state = getState();
-        if (state) audio.play(state, -1, null);
-      }
+      if (on) arm(); else audio.stop();
       label();
     };
     label();
-    return { isOn: function () { return on; }, refresh: label };
+    return {
+      isOn: function () { return on; },
+      // Restart the soundtrack loop if the toggle is on — after a seek, or
+      // after an endcard PLAY WITHOUT pass hands the sound back.
+      rearm: function () { if (on) arm(); }
+    };
   }
 
   // ---- Scrubber ------------------------------------------------------------
@@ -1028,8 +1109,17 @@
     container.innerHTML = html;
 
     // The counterfactual, audible: replay the finished piece with one voice
-    // muted. Hidden entirely when audio is off or unavailable.
+    // muted. Hidden entirely when audio is off or unavailable. A pass
+    // interrupts the soundtrack loop; ending it (STOP or the natural end)
+    // hands the sound back through info.resume.
     var buttons = container.querySelectorAll(".end-mute");
+    function resetButtons() {
+      for (var r = 0; r < buttons.length; r++) {
+        buttons[r].dataset.on = "";
+        buttons[r].textContent = "PLAY WITHOUT " + C.clampName(String(
+          names[parseInt(buttons[r].dataset.seat, 10)])).toUpperCase();
+      }
+    }
     for (var b = 0; b < buttons.length; b++) {
       (function (button) {
         button.onclick = function () {
@@ -1038,17 +1128,16 @@
           var seat = parseInt(button.dataset.seat, 10);
           var voice = (state.seats || [])[seat] ?
             state.seats[seat].voice : -1;
-          if (button.dataset.on === "yes") {
+          var wasOn = button.dataset.on === "yes";
+          resetButtons();
+          if (wasOn) {
             info.audio.stop();
-            button.dataset.on = "";
-            button.textContent = "PLAY WITHOUT " +
-              C.clampName(String(names[seat])).toUpperCase();
+            if (info.resume) info.resume();
             return;
           }
-          info.audio.play(state, voice, function () {
-            button.dataset.on = "";
-            button.textContent = "PLAY WITHOUT " +
-              C.clampName(String(names[seat])).toUpperCase();
+          info.audio.once(state, voice, function () {
+            resetButtons();
+            if (info.resume) info.resume();
           });
           button.dataset.on = "yes";
           button.textContent = "STOP";
@@ -1267,11 +1356,17 @@
           { seats: [], phase: "", turn: 0 };
       }
 
+      var audioToggle = bindAudioButton(options.audioButton ||
+        document.getElementById("audio"), audio, currentState);
+
       var scrub = buildChorusScrub(options.scrub, events, nameMap,
         function (next) {
           playing = false;
-          audio.stop();
           setIndex(next, true);
+          // A lit toggle keeps sounding across a seek: restart the loop on
+          // the sought state instead of leaving the button on and the room
+          // silent.
+          if (audioToggle) audioToggle.rearm();
         });
       if (options.playButton) {
         options.playButton.onclick = function () {
@@ -1279,8 +1374,6 @@
           if (playing && index >= events.length) setIndex(0, true);
         };
       }
-      bindAudioButton(options.audioButton ||
-        document.getElementById("audio"), audio, currentState);
 
       var meta = {
         key: (states[0] && states[0].key ? states[0].key + " " +
@@ -1310,7 +1403,8 @@
         updateLegend(currentState(), nameMap);
         updateEndscreen(options.endscreen, payload.results,
           index >= events.length && events.length > 0, nameMap,
-          { audio: audio, state: currentState });
+          { audio: audio, state: currentState,
+            resume: function () { if (audioToggle) audioToggle.rearm(); } });
         if (index >= events.length && events.length > 0) {
           sweepLightpool(currentState());
         }
@@ -1337,7 +1431,8 @@
           options.playButton.classList.toggle("on", running);
         }
         renderer.draw(stateToView(currentState(), nameMap, effects, {
-          done: index >= events.length && events.length > 0
+          done: index >= events.length && events.length > 0,
+          audioPos: audio.position()
         }));
         requestAnimationFrame(frame);
       })(0);
