@@ -274,6 +274,20 @@ const INIT_SCRIPT = `(() => {
     window.postMessage = function (data, ...rest) { relay(data); return original(data, ...rest); };
   } catch (ignore) {}
   window.addEventListener("message", (event) => relay(event.data));
+  // Audio probe support: count scheduled notes so the soak can tell a viewer
+  // that actually SOUNDS from one whose audio toggle lights up over silence
+  // (chorus shipped exactly that: the toggle armed once against an empty
+  // grid and never scheduled a note for the rest of the replay).
+  try {
+    window.__coworldOscStarts = 0;
+    if (window.OscillatorNode && OscillatorNode.prototype.start) {
+      const start = OscillatorNode.prototype.start;
+      OscillatorNode.prototype.start = function (...rest) {
+        window.__coworldOscStarts += 1;
+        return start.apply(this, rest);
+      };
+    }
+  } catch (ignore) {}
 })();`;
 
 const READOUT_SCRIPT = `(() => {
@@ -391,12 +405,44 @@ async function main() {
     // that has to move: still advancing at the end means still playing.
     const tail = Math.min(2, args.soak / 2);
     const before = readout;
+    // AUDIO PROBE (auto-detected). A viewer that ships an #audio toggle is
+    // claiming the replay can be HEARD, so the soak turns it on and requires
+    // that oscillators actually start while the replay plays. A toggle that
+    // declares itself unavailable (disabled after the click — no
+    // AudioContext in this environment) is reported but never fails the
+    // run: audio must not gate the viewer. Viewers without #audio skip this.
+    let audioProbe = null;
+    try {
+      audioProbe = await page.evaluate(`(() => {
+        const button = document.querySelector("#audio");
+        if (!button) return null;
+        return { present: true, disabled: !!button.disabled };
+      })()`);
+      if (audioProbe && !audioProbe.disabled) {
+        await page.locator("#audio").first().click();
+        audioProbe.clicked = true;
+      }
+    } catch (error) {
+      record(`[audio-probe] ${error && error.message}`);
+    }
     await sleep(Math.max(0, args.soak - tail) * 1000);
     let middle = before;
     try { middle = await page.evaluate(READOUT_SCRIPT); } catch { /* keep the last good readout */ }
     await sleep(tail * 1000);
     let after = middle;
     try { after = await page.evaluate(READOUT_SCRIPT); } catch { /* keep the last good readout */ }
+    if (audioProbe && audioProbe.clicked) {
+      try {
+        const heard = await page.evaluate(`(() => ({
+          starts: window.__coworldOscStarts || 0,
+          disabled: !!(document.querySelector("#audio") || {}).disabled,
+        }))()`);
+        audioProbe.starts = heard.starts;
+        audioProbe.unavailable = heard.disabled;
+      } catch (error) {
+        record(`[audio-probe] ${error && error.message}`);
+      }
+    }
     const advanced = (a, b) => ["clock", "tick", "scorebug"].some(
       (key) => a && b && a[key] !== b[key]);
     const moved = advanced(before, middle) && advanced(middle, after);
@@ -407,6 +453,7 @@ async function main() {
       middle: middle ? { clock: middle.clock, tick: middle.tick } : null,
       after: after ? { clock: after.clock, tick: after.tick } : null,
       status: after ? after.status : null,
+      audio: audioProbe,
       page_errors: pageErrors.slice(),
     };
     readout = after;
@@ -418,6 +465,10 @@ async function main() {
         `status ${JSON.stringify(soak.status)})`;
     } else if (pageErrors.length) {
       playFailure = `uncaught page error: ${pageErrors[0]}`;
+    } else if (audioProbe && audioProbe.clicked && !audioProbe.unavailable &&
+        !(audioProbe.starts > 0)) {
+      playFailure = `silent: #audio was toggled on and stayed available, ` +
+        `but no oscillator started during the ${args.soak}s soak`;
     }
     if (playFailure) failure = failure || playFailure;
   }
