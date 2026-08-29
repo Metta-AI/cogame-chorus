@@ -1346,6 +1346,7 @@
     var index = 0;
     var playing = true;
     var lastStep = 0;
+    var speed = 1;   // playback rate; the per-event dwell is stepMs / speed
     var audio = makeChorusAudio();
 
     makeRenderer(options.canvas, options.assetBase, function (renderer) {
@@ -1368,12 +1369,45 @@
           // silent.
           if (audioToggle) audioToggle.rearm();
         });
-      if (options.playButton) {
-        options.playButton.onclick = function () {
-          playing = !playing;
-          if (playing && index >= events.length) setIndex(0, true);
-        };
+      function togglePlay() {
+        playing = !playing;
+        if (playing && index >= events.length) setIndex(0, true);
       }
+      if (options.playButton) {
+        options.playButton.onclick = togglePlay;
+        // Speed chips ride in the transport bar next to the play button.
+        var chips = [];
+        var row = document.createElement("span");
+        row.className = "tspeed";
+        [0.5, 1, 2].forEach(function (rate) {
+          var chip = document.createElement("button");
+          chip.type = "button";
+          chip.className = "tchip" + (rate === speed ? " on" : "");
+          chip.textContent = rate + "×";
+          chip.onclick = function () {
+            speed = rate;
+            chips.forEach(function (c) {
+              c.classList.toggle("on", c === chip);
+            });
+          };
+          chips.push(chip);
+          row.appendChild(chip);
+        });
+        options.playButton.parentNode.insertBefore(
+          row, options.playButton.nextSibling);
+      }
+      // Space pauses/resumes, exactly like the play button — but never
+      // while the viewer is typing somewhere.
+      document.addEventListener("keydown", function (evt) {
+        if (evt.code !== "Space" && evt.key !== " ") return;
+        var t = evt.target;
+        if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" ||
+            t.tagName === "SELECT" || t.isContentEditable)) {
+          return;
+        }
+        evt.preventDefault();   // no page scroll, no double button fire
+        togglePlay();
+      });
 
       var meta = {
         key: (states[0] && states[0].key ? states[0].key + " " +
@@ -1421,7 +1455,7 @@
           shown && shown.kind === "end" ? 1500 :
           600;
         if (playing && index < events.length &&
-            timestamp - lastStep > stepMs) {
+            timestamp - lastStep > stepMs / speed) {
           lastStep = timestamp;
           setIndex(index + 1, false);
         }
