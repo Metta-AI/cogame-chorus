@@ -424,6 +424,11 @@ proc requestFor(client: LlmClient, system, user: string):
   headers["content-type"] = "application/json"
   if client.transport == ltBedrock:
     body["anthropic_version"] = %BedrockAnthropicVersion
+    ## Same effort guard as the direct transport: a pinned BEDROCK_MODEL on a
+    ## Sonnet/Opus tier would otherwise run at the default (high) effort.
+    let bedrockModel = client.bedrockModels[client.bedrockModel]
+    if "haiku" notin bedrockModel and "4-5" notin bedrockModel:
+      body["output_config"] = %*{"effort": "low"}
     if client.bedrockToken.len > 0:
       headers["authorization"] = "Bearer " & client.bedrockToken
     result.url = client.bedrockUrl()
