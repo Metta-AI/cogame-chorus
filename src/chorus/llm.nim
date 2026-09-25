@@ -1,14 +1,8 @@
-## Claude-backed decision making for Chorus. Each seat's policy is just a
-## prompt: the game server composes the seat's view (its voice, the whole
-## grid, the chord plan, the live score, its own counterfactual credit, the
-## other seats' messages, its notes) plus that seat's prompt and asks Claude
-## which bar it writes.
+## Claude-backed player policy. The player rebuilds its policy view from the
+## seat observation and chooses a complete bar action inside its container.
 ##
-## Decisions within a turn are simultaneous by rule, so all four requests go
-## out as ONE parallel batch (curly.makeRequests); invalid replies are
-## retried once as a smaller batch carrying an explicit hint, and anything
-## still failing plays the `arpeggio` baseline, which is legal by
-## construction.
+## Invalid model replies are retried once with an explicit hint. A failed
+## model request uses the legal `arpeggio` baseline.
 ##
 ## Credentials, in order of preference:
 ##   Bedrock sidecar / bearer token   - hosted pods
@@ -22,7 +16,10 @@ import
   std/[json, math, os, strutils, unicode],
   bitworld/runtime,
   curly,
-  sim
+  sim,
+  policy
+
+export policy
 
 const
   AnthropicUrl = "https://api.anthropic.com/v1/messages"
@@ -32,21 +29,6 @@ const
   MaxErrorLen* = 200
 
 type
-  ScriptKind* = enum
-    skNone = "none"
-    skArpeggio = "arpeggio"
-    skPedal = "pedal"
-
-  Decision* = object
-    target*: int
-    steps*: seq[int]
-    say*: string
-    notes*: string      ## "" when the reply carried none
-    scripted*: bool     ## true when a baseline produced this bar rather
-                        ## than a parsed model reply — including the
-                        ## fallback after the retry is exhausted. The
-                        ## replay's `bar.scripted` flag is this field.
-
   LlmTransport = enum
     ltNone, ltBedrock, ltAnthropic
 
@@ -63,14 +45,6 @@ type
     maxOutputTokens: int
     timeoutSeconds: int
     disabled*: bool   ## true once credentials are known-unavailable
-
-proc parseScriptKind*(text: string): ScriptKind =
-  ## PLAYER_SCRIPTED values: "1"/"true"/"yes"/"arpeggio" play the arpeggio
-  ## bot, "pedal" the pedal bot, anything else nothing.
-  case text.strip().toLowerAscii()
-  of "1", "true", "yes", "arpeggio": skArpeggio
-  of "pedal", "drone": skPedal
-  else: skNone
 
 proc resolveApiKey(): string =
   result = getEnv("ANTHROPIC_API_KEY").strip()
@@ -89,10 +63,7 @@ proc bedrockModelIds(): seq[string] =
   ## Bedrock inference-profile candidates, tried in order. BEDROCK_MODEL
   ## pins a single id; without it, fall through this list — model access is
   ## a per-account Marketplace subscription, so an id that works in one
-  ## account 403s in another. The config "model" field is NOT consulted
-  ## here: it applies to the direct-Anthropic transport only, and the
-  ## haiku-first ordering below is a shared-capacity decision that trumps
-  ## per-game preference.
+  ## account 403s in another.
   let pinned = getEnv("BEDROCK_MODEL").strip()
   if pinned.len > 0:
     return @[pinned]
@@ -118,11 +89,11 @@ proc bedrockUrl(client: LlmClient): string =
   client.bedrockEndpoint & "/model/" &
     client.bedrockModels[client.bedrockModel] & "/invoke"
 
-proc newLlmClient*(config: GameConfig): LlmClient =
+proc newLlmClient*(): LlmClient =
   result = LlmClient(
-    model: config.model,
-    maxOutputTokens: config.maxOutputTokens,
-    timeoutSeconds: config.llmTimeoutSeconds
+    model: getEnv("PLAYER_MODEL", "claude-sonnet-5"),
+    maxOutputTokens: parseInt(getEnv("PLAYER_MAX_OUTPUT_TOKENS", "900")),
+    timeoutSeconds: parseInt(getEnv("PLAYER_MODEL_TIMEOUT_SECONDS", "30"))
   )
   let bedrockEndpoint = getEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME").strip()
   let bedrockToken = getEnv("AWS_BEARER_TOKEN_BEDROCK").strip()
@@ -150,66 +121,6 @@ proc newLlmClient*(config: GameConfig): LlmClient =
     result.transport = ltNone
     result.disabled = true
     echo "chorus llm: no LLM credentials; using scripted fallback"
-
-# ---- Scripted baselines -----------------------------------------------------
-
-proc clampToken(token: int): int =
-  max(0, min(MaxToken, token))
-
-proc emptySteps(): seq[int] =
-  result = newSeq[int](Steps)
-  for index in 0 ..< Steps:
-    result[index] = Rest
-
-proc arpeggioBar*(sim: Sim, voice, bar: int): seq[int] =
-  ## The strong baseline, and the fallback for a failed LLM seat: chord
-  ## tones spread across the voices, rotated a step each bar so the piece
-  ## never settles on the repetition floor.
-  result = emptySteps()
-  let root = sim.chords[bar]
-  let tones = [clampToken(root), clampToken(root + 2), clampToken(root + 4)]
-  let rot = bar mod 3
-  var onsets: seq[int]
-  var tokens: seq[int]
-  case voice
-  of 0:
-    onsets = @[0, 8]
-    tokens =
-      if bar mod 2 == 0: @[tones[0], tones[0]]
-      else: @[tones[0], tones[2]]
-  of 1:
-    onsets = @[0, 4, 8, 12]
-    tokens = @[tones[0], tones[1], tones[2], tones[1]]
-  of 2:
-    onsets = @[2, 6, 10, 14]
-    tokens = @[tones[1], tones[2], tones[0], tones[2]]
-  else:
-    onsets = @[0, 3, 6, 10, 12]
-    tokens = @[tones[2], clampToken(tones[0] + 7), tones[1], tones[2],
-      tones[1]]
-  for index, step in onsets:
-    result[step] = tokens[(index + rot) mod tokens.len]
-
-proc pedalBar*(sim: Sim, voice, bar: int): seq[int] =
-  ## The weak, honest filler: a root pedal on the downbeat and a fifth
-  ## halfway through the odd bars. Too thin to sit in the density band, so
-  ## a table of four pedals scores well below a table of four arpeggios.
-  result = emptySteps()
-  let root = sim.chords[bar]
-  result[0] = clampToken(root)
-  if bar mod 2 == 1:
-    result[8] = clampToken(root + 4)
-
-proc scriptedAction*(sim: Sim, seat: int, kind: ScriptKind): Decision =
-  ## Rule-based baseline for `seat`. Always legal; never talks or notes;
-  ## always writes this turn's new bar.
-  let voice = sim.voiceOf[seat]
-  result.target = sim.turn
-  result.scripted = true
-  result.steps =
-    case kind
-    of skPedal: pedalBar(sim, voice, sim.turn)
-    else: arpeggioBar(sim, voice, sim.turn)
 
 # ---- Prompt building --------------------------------------------------------
 

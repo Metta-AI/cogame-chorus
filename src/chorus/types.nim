@@ -16,11 +16,8 @@ type
                                 ## silent
     sampled*: bool              ## true once the budget cap has been applied
     turnDelayMs*: int
-    minTurnSpacingMs*: int      ## floor between LLM batch starts (ms)
     playerConnectTimeoutSeconds*: float
-    model*: string
-    maxOutputTokens*: int
-    llmTimeoutSeconds*: int
+    turnResponseTimeoutSeconds*: int
 
   EventKind* = enum
     evStart = "start"
@@ -53,11 +50,8 @@ proc defaultGameConfig*(): GameConfig =
     talk: true,
     episodeTimeoutSeconds: 1200,
     turnDelayMs: 400,
-    minTurnSpacingMs: 20000,
     playerConnectTimeoutSeconds: 180,
-    model: "claude-sonnet-5",
-    maxOutputTokens: 900,
-    llmTimeoutSeconds: 30
+    turnResponseTimeoutSeconds: 70
   )
 
 proc update*(config: var GameConfig, configJson: string) =
@@ -87,17 +81,11 @@ proc update*(config: var GameConfig, configJson: string) =
     config.sampled = node["sampled"].getBool()
   if node.hasKey("turnDelayMs"):
     config.turnDelayMs = node["turnDelayMs"].getInt()
-  if node.hasKey("minTurnSpacingMs"):
-    config.minTurnSpacingMs = node["minTurnSpacingMs"].getInt()
   if node.hasKey("player_connect_timeout_seconds"):
     config.playerConnectTimeoutSeconds =
       node["player_connect_timeout_seconds"].getFloat()
-  if node.hasKey("model"):
-    config.model = node["model"].getStr()
-  if node.hasKey("maxOutputTokens"):
-    config.maxOutputTokens = node["maxOutputTokens"].getInt()
-  if node.hasKey("llmTimeoutSeconds"):
-    config.llmTimeoutSeconds = node["llmTimeoutSeconds"].getInt()
+  if node.hasKey("turnResponseTimeoutSeconds"):
+    config.turnResponseTimeoutSeconds = node["turnResponseTimeoutSeconds"].getInt()
   if config.bars < 4:
     raise newException(ChorusError, "bars must be at least 4")
   if config.bars > 16:

@@ -5,7 +5,7 @@
 ## beating; the pedal baseline must be the weaker of the two.
 
 import std/[json, monotimes, os, strutils, times, unicode, unittest]
-import chorus/[llm, sim]
+import chorus/[llm, policy_view, sim]
 
 proc fixture(seed: int, bars = 8): GameConfig =
   result = defaultGameConfig()
@@ -40,6 +40,20 @@ proc playScripted(config: GameConfig, kind: ScriptKind,
         decision.notes, true)
 
 suite "scripted baselines":
+  test "seat observation reproduces policy prompt without other private notes":
+    var sim = initSim(fixture(11, bars = 6))
+    sim.notes[0] = "private motif"
+    sim.notes[1] = "other private note"
+    for seat in sim.pendingSeats():
+      let decision = scriptedAction(sim, seat, skArpeggio)
+      sim.applyBar(seat, decision.target, decision.steps, "hello", "", true)
+    let view = sim.seatViewJson(0, true)
+    check "other private note" notin $view
+    check view["seat"]["notes"].getStr() == "private motif"
+    let reconstructed = simFromSeatView(view)
+    check reconstructed.userPrompt(0, "strategy") ==
+      sim.userPrompt(0, "strategy")
+
   test "both baselines play full episodes legally and fast, in every voice":
     for seed in [1, 5, 42, 1234]:
       for kind in [skArpeggio, skPedal]:
@@ -95,7 +109,9 @@ suite "scripted baselines":
 
   test "decideAll falls back to scripted with no credentials":
     let config = fixture(3, bars = 6)
-    let client = newLlmClient(config)
+    delEnv("ANTHROPIC_API_KEY")
+    delEnv("ANTHROPIC_API_KEY_URI")
+    let client = newLlmClient()
     check client.disabled
     var sim = initSim(config)
     let seats = sim.pendingSeats()
@@ -121,9 +137,10 @@ suite "scripted baselines":
     ## attempts fail on transport, fast and without a network.
     putEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME", "http://127.0.0.1:9")
     putEnv("AWS_BEARER_TOKEN_BEDROCK", "unusable-in-tests")
-    var config = fixture(7, bars = 6)
-    config.llmTimeoutSeconds = 5
-    let client = newLlmClient(config)
+    let config = fixture(7, bars = 6)
+    putEnv("PLAYER_MODEL_TIMEOUT_SECONDS", "5")
+    let client = newLlmClient()
+    delEnv("PLAYER_MODEL_TIMEOUT_SECONDS")
     delEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME")
     delEnv("AWS_BEARER_TOKEN_BEDROCK")
     check not client.disabled

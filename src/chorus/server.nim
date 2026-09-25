@@ -3,37 +3,37 @@
 ## Endpoints:
 ##   GET /healthz                    - liveness
 ##   GET /client/global              - spectator page
-##   GET /client/player              - player page (view-only; policies are prompts)
+##   GET /client/player              - player page
 ##   GET /client/replay              - replay page (replay mode)
 ##   GET /client/renderer.js         - the chorus stage renderer
 ##   GET /client/chrome_common.js    - the inherited chrome module
 ##   GET /client/chrome.css          - the inherited chrome stylesheet
 ##   GET /client/assets/<name>       - sprites and fonts
-##   WS  /player?slot=N&token=T      - player protocol (prompt delivery)
+##   WS  /player?slot=N&token=T      - player observation/action protocol
 ##   WS  /global                     - spectator snapshots
 ##   WS  /replay                     - replay payload (replay mode)
 ##
-## Player protocol (chorus.player.v1), all JSON text frames:
+## Player protocol (chorus.player.v2), all JSON text frames:
 ##   game -> player: {"type":"welcome","slot":N,"name":...,"voice":...}
 ##                   {"type":"state",...} after every event (redacted to the
 ##                   seat's own voice, its own credit and the shared piece
 ##                   score)
+##                   {"type":"turn","id":N,"view":{...}} for each action
 ##                   {"type":"final","scores":[...],"voices":[...]}
-##   player -> game: {"type":"prompt","prompt":"...","scripted":"arpeggio"}
-##                   (max 4000 runes; scripted plays a built-in baseline for
-##                   that seat: "arpeggio" / "1", or "pedal")
+##   player -> game: {"type":"decision","id":N,"action":{target,steps,
+##                    say,notes,scripted}}
 
 import
-  std/[json, locks, os, sets, strutils, tables, times, unicode],
+  std/[json, locks, os, sets, strutils, tables, times],
   bitworld/runtime,
   curly,
   mummy,
   mummy/routers,
-  llm,
+  policy,
+  policy_view,
   sim
 
 const
-  MaxPromptLen = 4000
   ReplayVersion = 1
   ## After the artifacts are written the server keeps answering /healthz and
   ## /global for this long before exiting: the episode runner pings /global
@@ -45,8 +45,8 @@ type
   GameState = object
     config: GameConfig
     sim: Sim
-    prompts: seq[string]
-    scripted: seq[ScriptKind]
+    replies: Table[int, JsonNode]
+    requestId: int
     playerSockets: Table[int, WebSocket]
     socketSlots: Table[WebSocket, int]
     globalSockets: HashSet[WebSocket]
@@ -99,41 +99,6 @@ proc snapshotJson(gs: GameState): JsonNode =
   result["done"] = %gs.sim.done
   result["connected"] = connected
 
-proc playerStateJson(gs: GameState, slot: int): JsonNode =
-  ## A seat sees the shared piece score and ITS OWN counterfactual credit;
-  ## the other seats' credits and notes are not in this frame. Decisions are
-  ## server-side, so this costs the policy nothing.
-  let voice = gs.sim.voiceOf[slot]
-  var bars = newJArray()
-  for bar in gs.sim.grid[voice]:
-    var row = newJArray()
-    for step in 0 ..< Steps:
-      row.add(%bar[step])
-    bars.add(row)
-  let parts = gs.sim.pieceScore(gs.sim.grid, gs.sim.turnsPlayed)
-  %*{
-    "type": "state",
-    "slot": slot,
-    "name": gs.sim.names[slot],
-    "voice": VoiceNames[voice],
-    "seat": {
-      "voice": voice,
-      "voiceName": VoiceNames[voice],
-      "base": gs.sim.baseMidi(voice),
-      "score": round6(gs.sim.score(slot)),
-      "onsets": gs.sim.onsetsOf(voice, gs.sim.turnsPlayed),
-      "bars": bars,
-      "notes": gs.sim.notes[slot]
-    },
-    "piece": round6(parts.piece),
-    "turn": gs.sim.turn,
-    "turns": gs.config.bars,
-    "turnsPlayed": gs.sim.turnsPlayed,
-    "started": gs.started,
-    "done": gs.sim.done,
-    "reason": gs.sim.reason
-  }
-
 proc broadcastLocked(gs: GameState) =
   ## Callers hold stateLock. Spectators get the whole table; players get the
   ## redacted per-seat state.
@@ -141,7 +106,7 @@ proc broadcastLocked(gs: GameState) =
   for socket in gs.globalSockets:
     socket.send(payload)
   for slot, socket in gs.playerSockets:
-    socket.send($gs.playerStateJson(slot))
+    socket.send($gs.sim.seatViewJson(slot, gs.started))
 
 proc writeArtifact(uri, data, contentType, methodEnv: string) =
   ## Writes a Coworld artifact, honoring the platform's PUT/POST method hint.
@@ -263,8 +228,6 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         config.tokens.len, " players connected"
       state.broadcastLocked()
 
-    let client = newLlmClient(config)
-
     ## The platform kills the episode at its timeout and keeps nothing.
     ## Play inside a fraction of it so results and the replay are written
     ## with room to spare. The hosted dispatcher hands the timeout only to
@@ -286,13 +249,9 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         (if hostedTimeout.len > 0: "from env" else: "assumed"),
         "); playing until ", (timeoutSeconds * PlayBudgetFraction).int, "s"
 
-    var lastBatchStart = 0.0
-
     while true:
       var simCopy: Sim
       var seats: seq[int]
-      var prompts: seq[string]
-      var scripted: seq[ScriptKind]
       withLock stateLock:
         if state.sim.done:
           break
@@ -307,53 +266,58 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           break
         seats = state.sim.pendingSeats()
         simCopy = state.sim
-        prompts = state.prompts
-        scripted = state.scripted
         echo "chorus: turn ", state.sim.turn, " of ", config.bars,
           " at ", (epochTime() - gameStart).int, "s"
 
-      ## The hosted Bedrock sidecar caps 30 requests/minute per episode, and
-      ## a turn can issue 4 + 4. Floor consecutive BATCH STARTS so the worst
-      ## case stays under the cap. Scripted-only turns issue nothing, so
-      ## they never wait — offline certification still finishes in seconds.
-      var needsLlm = false
-      if not client.disabled:
+      ## Each player gets its own observation from the same pre-action state.
+      ## The response queue is keyed by this turn's request id, so late
+      ## decisions can never affect the next turn.
+      withLock stateLock:
+        state.requestId = simCopy.turn + 1
+        state.replies.clear()
         for seat in seats:
-          if scripted[seat] == skNone:
-            needsLlm = true
-      if needsLlm and config.minTurnSpacingMs > 0 and lastBatchStart > 0.0:
-        var waitMs = config.minTurnSpacingMs -
-          int((epochTime() - lastBatchStart) * 1000.0)
-        if playDeadline > 0.0:
-          let room = int((playDeadline - epochTime()) * 1000.0)
-          waitMs = min(waitMs, max(room, 0))
-        if waitMs > 0:
-          sleep(waitMs)
-      if needsLlm:
-        lastBatchStart = epochTime()
+          if state.playerSockets.hasKey(seat):
+            state.playerSockets[seat].send($ %*{
+              "type": "turn",
+              "id": state.requestId,
+              "view": simCopy.seatViewJson(seat, true)
+            })
 
-      ## The slow part (Claude, one parallel batch for the turn) runs
-      ## outside the lock on a snapshot; only this thread mutates the sim,
-      ## so the snapshot cannot go stale.
-      let decisions = client.decideAll(simCopy, seats, prompts, scripted)
+      let turnDeadline = if playDeadline > 0.0:
+        min(epochTime() + config.turnResponseTimeoutSeconds.float, playDeadline)
+      else:
+        epochTime() + config.turnResponseTimeoutSeconds.float
+      while epochTime() < turnDeadline:
+        var complete = false
+        withLock stateLock:
+          complete = state.replies.len >= seats.len
+        if complete:
+          break
+        sleep(25)
 
       withLock stateLock:
-        for index, seat in seats:
-          let decision = decisions[index]
-          ## Provenance rides in the decision: a seat whose two attempts
-          ## timed out or failed to parse comes back from `decideAll` as a
-          ## baseline bar, and only the decision knows that.
-          let wasScripted = decision.scripted
-          echo "chorus: turn ", state.sim.turn, " ", state.sim.names[seat],
-            " (", state.sim.voiceName(seat), ") writes bar ",
-            decision.target,
-            (if decision.say.len > 0: " says \"" & decision.say & "\""
-             else: ""),
-            " at ", (epochTime() - gameStart).int, "s"
+        for seat in seats:
           try:
+            if not state.replies.hasKey(seat):
+              raise newException(ChorusError, "player reply timed out")
+            let action = state.replies[seat]["action"]
+            var decision = Decision(
+              target: action["target"].getInt(),
+              say: action{"say"}.getStr(),
+              notes: action{"notes"}.getStr(),
+              scripted: action{"scripted"}.getBool()
+            )
+            for step in action["steps"]:
+              decision.steps.add(step.getInt())
+            echo "chorus: turn ", state.sim.turn, " ", state.sim.names[seat],
+              " (", state.sim.voiceName(seat), ") writes bar ",
+              decision.target,
+              (if decision.say.len > 0: " says \"" & decision.say & "\""
+               else: ""),
+              " at ", (epochTime() - gameStart).int, "s"
             state.sim.applyBar(seat, decision.target, decision.steps,
-              decision.say, decision.notes, wasScripted)
-          except ChorusError as error:
+              decision.say, decision.notes, decision.scripted)
+          except CatchableError as error:
             echo "chorus: reply rejected (", error.msg,
               "); using the arpeggio fallback"
             let fallback = scriptedAction(state.sim, seat, skArpeggio)
@@ -444,7 +408,7 @@ proc playerUpgradeHandler(request: Request) {.gcsafe.} =
       let voice = state.sim.voiceOf[slot]
       websocket.send($ %*{
         "type": "welcome",
-        "protocol": "chorus.player.v1",
+        "protocol": "chorus.player.v2",
         "slot": slot,
         "name": state.sim.names[slot],
         "voice": VoiceNames[voice],
@@ -494,22 +458,12 @@ proc websocketHandler(
         return
       try:
         let payload = parseJson(message.data)
-        if payload{"type"}.getStr() == "prompt":
-          var prompt = payload{"prompt"}.getStr()
-          if prompt.runeLen > MaxPromptLen:
-            prompt = prompt.runeSubStr(0, MaxPromptLen)
-          let node = payload{"scripted"}
-          let scripted =
-            if node.isNil: skNone
-            elif node.kind == JBool: (if node.getBool(): skArpeggio
-              else: skNone)
-            else: parseScriptKind(node.getStr())
+        if payload["type"].getStr() == "decision":
           withLock stateLock:
-            state.prompts[slot] = prompt
-            state.scripted[slot] = scripted
-          echo "chorus: slot ", slot, " delivered a prompt (",
-            prompt.len, " chars",
-            (if scripted != skNone: ", scripted " & $scripted else: ""), ")"
+            if state.started and not state.finished and
+                payload["id"].getInt() == state.requestId and
+                not state.replies.hasKey(slot):
+              state.replies[slot] = payload
       except CatchableError as error:
         echo "chorus: ignoring bad player frame: ", error.msg
     of ErrorEvent:
@@ -581,8 +535,7 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
     raise newException(ChorusError, "tokens and players must align")
   state.config = config
   state.sim = initSim(config)
-  state.prompts = newSeq[string](config.players.len)
-  state.scripted = newSeq[ScriptKind](config.players.len)
+  state.replies = initTable[int, JsonNode]()
   runtimeConfigGlobal = runtimeConfig
 
   let router = buildRouter(replayMode = false)
