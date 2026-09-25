@@ -15,7 +15,7 @@
     "replay_viewer": {
       "bundle": "static-replay-viewer"
     },
-    "description": "Chorus: four LLM-piloted cogs write ONE piece of music together on a 16-step sequencer. Each seat owns one voice - Bass, Tenor, Alto or Soprano - and the seat-to-voice assignment is a seeded permutation, redrawn every episode, so no policy can specialise on one register. The key, the mode, the tempo and a bar-by-bar chord plan are all drawn from the seed and revealed to everybody from turn 0. Every turn all four cogs write one bar at the same time, simultaneously and without seeing each other's choice: either the new bar, or a rewrite of one of their own earlier bars (a rewrite spends the turn, because the new bar just holds a copy of the last one). A bar is 16 integer tokens, -1 for a rest and 0..13 for a scale degree in that voice's register; every note lasts exactly one step. When the piece is finished a fixed, public, deterministic metric scores it out of 100: consonance (35%), voice leading (25%), rhythmic coherence (25%) and novelty against the same voice's earlier bars (15%). A seat's SCORE is a counterfactual: the piece as written minus the piece with every note of that seat's voice deleted. There is no vote and nobody judges anybody, so there is nothing to collude on - the only way to raise your score is to raise the piece by more than your absence would, and a voice that is rougher than the piece's average or that fills the grid until all four voices sound at once scores BELOW ZERO. Players receive their own observations and return complete bar actions. Prompt, scripted, and Jev policies run in player containers; the game validates each action and records the result.",
+    "description": "Chorus: four LLM-piloted cogs write ONE piece of music together on a 16-step sequencer. Each seat owns one voice - Bass, Tenor, Alto or Soprano - and the seat-to-voice assignment is a seeded permutation, redrawn every episode, so no policy can specialise on one register. The key, the mode, the tempo and a bar-by-bar chord plan are all drawn from the seed and revealed to everybody from turn 0. Every turn all four cogs write one bar at the same time, simultaneously and without seeing each other's choice: either the new bar, or a rewrite of one of their own earlier bars (a rewrite spends the turn, because the new bar just holds a copy of the last one). A bar is 16 integer tokens, -1 for a rest and 0..13 for a scale degree in that voice's register; every note lasts exactly one step. When the piece is finished a fixed, public, deterministic metric scores it out of 100: consonance (35%), voice leading (25%), rhythmic coherence (25%) and novelty against the same voice's earlier bars (15%). A seat's SCORE is a counterfactual: the piece as written minus the piece with every note of that seat's voice deleted. There is no vote and nobody judges anybody, so there is nothing to collude on - the only way to raise your score is to raise the piece by more than your absence would, and a voice that is rougher than the piece's average or that fills the grid until all four voices sound at once scores BELOW ZERO. Players receive their own observations and return complete bar actions. Prompt and scripted policies run in player containers; the game validates each action and records the result.",
     "owner": "daveey@gmail.com",
     "runnable": {
       "type": "game",
@@ -329,29 +329,6 @@
         }
       },
       "source_url": "https://github.com/Metta-AI/cogame-chorus/tree/main"
-    },
-    {
-      "type": "player",
-      "image": "{{CHORUS_IMAGE}}",
-      "run": [
-        "/bin/chorus-player"
-      ],
-      "resources": {
-        "requests": {
-          "cpu": "100m",
-          "memory": "64Mi"
-        },
-        "limits": {
-          "cpu": "1"
-        }
-      },
-      "source_url": "https://github.com/Metta-AI/cogame-chorus/tree/main",
-      "id": "chorus-jev",
-      "name": "Chorus Jev Player",
-      "description": "Jev chooses a complete bar action from the private seat observation through the player model endpoint.",
-      "env": {
-        "PLAYER_POLICY": "jev"
-      }
     }
   ],
   "variants": [
@@ -459,7 +436,7 @@
     },
     "players": [
       {
-        "player_id": "chorus-jev"
+        "player_id": "chorus-player"
       },
       {
         "player_id": "chorus-arpeggio"

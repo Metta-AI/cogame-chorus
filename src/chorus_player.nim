@@ -1,8 +1,8 @@
 ## Chorus player: receives its private observation and returns a complete bar.
 
-import std/[json, options, os, strutils]
+import std/[json, options, os]
 import whisky
-import chorus/[llm, policy_view, jev_policy, sim]
+import chorus/[llm, policy_view, sim]
 
 const DefaultPrompt = """
 Write musically and earn your seat. Your score is the piece with your voice
@@ -18,8 +18,7 @@ when isMainModule:
     quit("COWORLD_PLAYER_WS_URL is not set", 1)
   let prompt = getEnv("PLAYER_PROMPT", DefaultPrompt)
   let scripted = parseScriptKind(getEnv("PLAYER_SCRIPTED"))
-  let jev = getEnv("PLAYER_POLICY").strip().toLowerAscii() == "jev"
-  let client = if scripted == skNone and not jev: newLlmClient() else: nil
+  let client = if scripted == skNone: newLlmClient() else: nil
   echo "chorus player: connecting to game"
   let socket = newWebSocket(url)
   try:
@@ -39,12 +38,7 @@ when isMainModule:
         let sim = simFromSeatView(view)
         let seat = view["slot"].getInt()
         var decision: Decision
-        if jev:
-          decision = if jevAvailable():
-            chooseJevAction(view, sim, seat)
-          else:
-            scriptedAction(sim, seat, skArpeggio)
-        elif scripted != skNone:
+        if scripted != skNone:
           decision = scriptedAction(sim, seat, scripted)
         else:
           var prompts = newSeq[string](Seats)

@@ -20,7 +20,7 @@ and a voice that is rougher than the piece's average, or that fills the grid unt
 sound at once, scores **below zero**. Credits are leave-one-out differences and do *not* sum to the
 piece score.
 
-Each player receives its own observation and returns a complete bar action. Prompt, Jev, and
+Each player receives its own observation and returns a complete bar action. Prompt and
 scripted policies run in player containers. The game validates simultaneous replies, applies a
 scripted fallback for missing or invalid actions, and records the replay.
 
@@ -31,7 +31,6 @@ scripted fallback for missing or invalid actions, and records the replay.
 | `src/chorus/types.nim` | the config and the event record |
 | `src/chorus/sim.nim` | the pure rules and the metric — no IO, no networking, no LLM. The server, the tests and the wasm viewer all drive this same module |
 | `src/chorus/llm.nim` | player-side prompt building and Claude decision parsing |
-| `src/chorus/jev_policy.nim` | player-side Jev choice over complete bar actions |
 | `src/chorus/policy.nim` | shared scripted baselines and action type |
 | `src/chorus/policy_view.nim` | private seat observation and player-side simulation view |
 | `src/chorus/server.nim` | the Coworld game contract: HTTP routes, the player and spectator websockets, the turn loop |
@@ -85,9 +84,6 @@ motif each bar. Rest on any step where three voices already sound."
 ```
 
 Two scripted baselines ship in the same image and are selected with `PLAYER_SCRIPTED`:
-
-Set `PLAYER_POLICY=jev` to let Jev choose among complete bar actions from the private seat
-observation. The player uses its Bedrock sidecar or `TYPESAFE_API_KEY` and `TYPESAFE_BASE_URL`.
 
 | value | baseline |
 |---|---|
