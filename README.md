@@ -20,9 +20,9 @@ and a voice that is rougher than the piece's average, or that fills the grid unt
 sound at once, scores **below zero**. Credits are leave-one-out differences and do *not* sum to the
 piece score.
 
-**A policy is just a prompt.** The player container's only job is to deliver its prompt; every
-decision is made by the game server, which sends that prompt plus the seat's observation to Claude
-as one parallel batch per turn.
+Each player receives its own observation and returns a complete bar action. Prompt and
+scripted policies run in player containers. The game validates simultaneous replies, applies a
+scripted fallback for missing or invalid actions, and records the replay.
 
 ## Layout
 
@@ -30,7 +30,9 @@ as one parallel batch per turn.
 |---|---|
 | `src/chorus/types.nim` | the config and the event record |
 | `src/chorus/sim.nim` | the pure rules and the metric — no IO, no networking, no LLM. The server, the tests and the wasm viewer all drive this same module |
-| `src/chorus/llm.nim` | prompt building, the parallel Claude batch, tolerant reply parsing, and the two scripted baselines |
+| `src/chorus/llm.nim` | player-side prompt building and Claude decision parsing |
+| `src/chorus/policy.nim` | shared scripted baselines and action type |
+| `src/chorus/policy_view.nim` | private seat observation and player-side simulation view |
 | `src/chorus/server.nim` | the Coworld game contract: HTTP routes, the player and spectator websockets, the turn loop |
 | `src/chorus.nim` | the game entrypoint (`/bin/chorus`) |
 | `src/chorus_player.nim` | the player entrypoint (`/bin/chorus-player`) |
@@ -70,7 +72,8 @@ Watch a live episode at `http://localhost:8080/client/global`, and a recorded on
 
 ## Fielding a policy
 
-Reuse the published image and set `PLAYER_PROMPT` to your strategy:
+Reuse the published image and set `PLAYER_PROMPT` to your strategy. Model credentials must be
+available to the player container:
 
 ```bash
 coworld upload-policy coworld-chorus:latest \
@@ -94,9 +97,9 @@ and offline certification finishes in seconds.
 
 - 4 seats, 4 voices (`Bass` 36, `Tenor` 48, `Alto` 60, `Soprano` 72), seeded permutation.
 - `bars` turns (default 8, range 4–16); every bar is 16 steps.
-- `target` must satisfy `0 ≤ target ≤ turn`; a missing `target` means this turn's new bar.
-- `steps` is exactly 16 tokens, each `-1` or `0..13`. A string of 16 whitespace- or
-  comma-separated tokens is also accepted, where `.`, `-`, `r`, `R` and `rest` all mean a rest.
+- `target` must satisfy `0 ≤ target ≤ turn` and is required in the player action.
+- `steps` is exactly 16 integer tokens, each `-1` or `0..13`. The prompt player accepts
+  flexible model output and sends a canonical action to the game.
 - `say` is one 100-rune line all three other cogs read next turn (talk variants only); `notes` is a
   600-rune private notebook fed back verbatim.
 - Two endings and no others: `complete` (all bars written) and `deadline` (the play deadline was
