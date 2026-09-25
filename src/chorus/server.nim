@@ -303,7 +303,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         for seat in seats:
           try:
             if not state.replies.hasKey(seat):
-              raise newException(ChorusError, "player reply timed out")
+              raise newException(ChorusError, "player reply missing")
             let action = state.replies[seat]["action"]
             var decision = Decision(
               target: action["target"].getInt(),
