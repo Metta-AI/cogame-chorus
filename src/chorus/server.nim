@@ -290,7 +290,11 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       while epochTime() < turnDeadline:
         var complete = false
         withLock stateLock:
-          complete = state.replies.len >= seats.len
+          complete = true
+          for seat in seats:
+            if not state.replies.hasKey(seat) and
+                state.playerSockets.hasKey(seat):
+              complete = false
         if complete:
           break
         sleep(25)
