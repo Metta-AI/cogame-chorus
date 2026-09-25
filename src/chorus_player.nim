@@ -40,7 +40,10 @@ when isMainModule:
         let seat = view["slot"].getInt()
         var decision: Decision
         if jev:
-          decision = chooseJevAction(view, sim, seat)
+          decision = if jevAvailable():
+            chooseJevAction(view, sim, seat)
+          else:
+            scriptedAction(sim, seat, skArpeggio)
         elif scripted != skNone:
           decision = scriptedAction(sim, seat, scripted)
         else:

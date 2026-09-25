@@ -4,6 +4,10 @@ import std/[json, os, strutils]
 import curly
 import policy, sim
 
+proc jevAvailable*(): bool =
+  getEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME").strip().len > 0 or
+    getEnv("TYPESAFE_API_KEY").strip().len > 0
+
 proc chooseJevAction*(view: JsonNode, sim: Sim, seat: int): Decision =
   let voice = sim.voiceOf[seat]
   var choices: seq[Decision]
