@@ -23,9 +23,7 @@
       "run": [
         "/bin/chorus"
       ],
-      "env": {
-        "ANTHROPIC_API_KEY_URI": "secret://coworld/chorus/anthropic_api_key"
-      },
+      "env": {},
       "source_url": "https://github.com/Metta-AI/cogame-chorus/tree/main"
     },
     "config_schema": {
