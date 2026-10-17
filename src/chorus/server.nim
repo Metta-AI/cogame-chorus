@@ -47,6 +47,7 @@ type
     sim: Sim
     prompts: seq[string]
     scripted: seq[ScriptKind]
+    promptEvidence: seq[string]
     playerSockets: Table[int, WebSocket]
     socketSlots: Table[WebSocket, int]
     globalSockets: HashSet[WebSocket]
@@ -222,6 +223,14 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
 
   sleep(500)
   echo "chorus: writing results and replay"
+  let provenance = state.promptEvidence & @[$(%*{
+    "schema": "chorus.prompt-provenance.v1", "kind": "episode", "reason": results["reason"],
+    "game_seed": state.config.seed, "prompt_bank": PromptBankVersion,
+    "prompt_variant": $state.config.selectedPromptVariant, "prompt_seed": state.config.promptSeed,
+    "source_revision": getEnv("COWORLD_SOURCE_REVISION"),
+    "records": state.promptEvidence.len, "scores": results["scores"]})]
+  writeArtifact(getEnv("COGAME_SAVE_TRAJECTORY_URI"), provenance.join("\n") & "\n",
+    "application/x-ndjson", "COGAME_SAVE_TRAJECTORY_METHOD")
   writeArtifact(
     runtimeConfig.resultsUri, $results, "application/json",
     "COGAME_RESULTS_METHOD"
@@ -340,6 +349,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       withLock stateLock:
         for index, seat in seats:
           let decision = decisions[index]
+          for record in decision.promptEvidence: state.promptEvidence.add($record)
           ## Provenance rides in the decision: a seat whose two attempts
           ## timed out or failed to parse comes back from `decideAll` as a
           ## baseline bar, and only the decision knows that.

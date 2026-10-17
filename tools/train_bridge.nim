@@ -13,19 +13,24 @@ proc seedOf(value: string): int =
     hash = (hash xor uint32(ord(ch))) * 16777619'u32
   int(hash and 0x7fffffff'u32)
 
+var languageMode = false
+
 proc decision(view: Sim, seat, id: int): JsonNode =
+  let system = systemPrompt(view, seat)
+  let user = userPrompt(view, seat, OperatorPrompt)
   %*{
     "kind": "decision", "game": "chorus", "decision_id": id,
     "seat": seat, "engine_seat": seat, "turn": view.turn,
     "semantic_view": {
       "seat": seat, "voice": view.voiceOf[seat], "turn": view.turn,
       "chords": view.chords, "grid": view.grid,
-      "score": view.score(seat)
+      "score": view.score(seat),
+      "prompt_template": promptMetadata(view.config, system, user)
     },
     "inbox": [],
     "messages": [
-      {"role": "system", "content": systemPrompt(view, seat)},
-      {"role": "user", "content": userPrompt(view, seat, OperatorPrompt)}
+      {"role": "system", "content": system},
+      {"role": "user", "content": user}
     ],
     "speech_messages": [],
     "action_schema": {
@@ -37,7 +42,8 @@ proc decision(view: Sim, seat, id: int): JsonNode =
         "say": {"type": "string"}, "notes": {"type": "string"}
       }
     },
-    "typed_question": newJNull()
+    "typed_question": newJNull(),
+    "inference_mode": (if languageMode: %"text_action" else: newJNull())
   }
 
 proc encoding(view: Sim, seat, id: int): JsonNode =
@@ -77,9 +83,12 @@ proc actionOf(decision: Decision): JsonNode =
 
 when isMainModule:
   let args = commandLineParams()
-  if args.len notin 1 .. 2:
-    quit("usage: chorus-train-bridge MANIFEST [VARIANT]", 1)
-  let variant = if args.len == 2: args[1] else: "standard"
+  if args.len notin 1 .. 3:
+    quit("usage: chorus-train-bridge MANIFEST [VARIANT [--language]]", 1)
+  let variant = if args.len >= 2: args[1] else: "standard"
+  if args.len == 3:
+    doAssert args[2] == "--language"
+    languageMode = true
   let manifest = parseFile(args[0])
   var variantConfig: JsonNode
   for entry in manifest["variants"]:
@@ -99,7 +108,11 @@ when isMainModule:
       let runtimeConfig = copy(variantConfig)
       runtimeConfig["tokens"] = %*["t0", "t1", "t2", "t3"]
       runtimeConfig["seed"] = %seedOf(request["seed"].getStr())
+      for key in ["promptVariant", "promptSeed"]:
+        if request.hasKey(key): runtimeConfig[key] = request[key]
       config.update($runtimeConfig)
+      if config.selectedPromptVariant in {pvHeldoutBriefing, pvHeldoutReference}:
+        raise newException(ChorusError, "held-out wording cannot enter training")
       config = sampleEpisode(config)
       game = initSim(config)
       view = game
@@ -111,7 +124,10 @@ when isMainModule:
     of "teacher":
       doAssert not game.done
       let teacher = view.scriptedAction(game.pendingSeats()[0], skArpeggio)
-      response = %*{"response": $actionOf(teacher)}
+      let action = if languageMode:
+          %*{"target": teacher.target, "steps": teacher.steps, "say": teacher.say, "notes": teacher.notes}
+        else: actionOf(teacher)
+      response = %*{"response": $action}
     of "step":
       doAssert not game.done and request["decision_id"].getInt() == id
       let action = parseJson(request["response"].getStr())

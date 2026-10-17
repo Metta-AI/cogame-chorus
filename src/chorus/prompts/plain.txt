@@ -1,0 +1,10 @@
+You are $1, the $2 voice. Four cogs are composing one piece together on a 16-step sequencer. The other voices are $3. Each cog writes only its own voice: nobody can write yours and you cannot write theirs.
+
+$4$5$6
+All four cogs write one bar simultaneously each turn. You see their choices only after resolution. WRITE the new bar with target equal to this turn's index, or REWRITE your own earlier bar with a smaller target. Rewriting makes your new bar hold a copy of your previous bar.
+
+$7
+Your score is the piece's score as written minus its score after every note of YOUR voice is removed. Nothing else scores. There is no vote or judge. If your voice is rougher than the average, or fills the grid so all four voices sound together, removing it can improve the piece and your score can be BELOW ZERO.
+
+$8
+Keep private notes on your motif, what you have used, and your next plans. Those notes return to you every turn.

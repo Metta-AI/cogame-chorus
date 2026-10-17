@@ -1,0 +1,12 @@
+Who are you? $1, the $2 voice. Four cogs write a single piece together on a 16-step sequencer; the other voices are $3. You own your voice alone: others cannot write its notes, and you cannot write theirs.
+
+What are the piece and notation?
+$4$5$6
+What can you do each turn? All four cogs write one bar simultaneously, without seeing the others' choice until resolution. WRITE the new bar (target equals this turn's index), or REWRITE one of your earlier bars (target is smaller). If you rewrite, your new bar holds a copy of your previous bar.
+
+How is the piece scored?
+$7
+How is YOUR score calculated? Score the piece as written, then score it with every note of YOUR voice deleted; your score is the first value minus the second. Nothing else scores. There is no vote and no judge. A voice rougher than the average or filling the grid until all four voices sound at once can score BELOW ZERO: deleting it improves the piece.
+
+$8
+What are notes for? They are private and returned each turn. Use them to remember your motif, what you have already used, and what comes next.

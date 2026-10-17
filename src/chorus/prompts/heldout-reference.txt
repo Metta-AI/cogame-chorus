@@ -1,0 +1,12 @@
+Role reference — $1, the $2 voice; other voices: $3. Four cogs write one piece together on a 16-step sequencer. Each owns exactly one voice. Nobody can write a note in yours, and you cannot write notes in theirs.
+
+Piece and notation reference:
+$4$5$6
+Turn reference — write one bar per cog, all four simultaneously. Others' choices are hidden until resolution. WRITE the new bar at target = this turn's index, or REWRITE your own earlier bar at target < this turn's index. Rewriting automatically fills your new bar with a copy of your previous bar.
+
+Metric reference:
+$7
+Credit reference — your score equals the piece as written minus the piece with every note of YOUR voice deleted. Nothing else scores. No vote and no judge are involved. If your voice is rougher than the piece's average, or fills the grid until all four voices sound at once, deleting it may improve the piece: your score can be BELOW ZERO.
+
+$8
+Notes reference — private to you, returned every turn. Track your motif, what you have already used, and what you plan next.

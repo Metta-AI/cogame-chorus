@@ -104,3 +104,64 @@ and offline certification finishes in seconds.
 
 Full rules and the metric with worked examples are in the manifest's `rules.md` and `scoring.md`
 pages, and the design note is at `docs/plans/2026-08-24-chorus-design.md`.
+
+## Prompt diversity and post-training
+
+`promptVariant` selects episode-stable rules wording. The training bank contains
+`canonical`, `plain`, `numbered`, `questions`, and `reordered`; `mixed` selects
+`promptSeed mod 5` from that order. Mixed selection requires an explicit nonnegative
+integer `promptSeed`, independent of the game seed. Defaults remain canonical.
+`heldout-briefing` and `heldout-reference` are reserved for hosted evaluation.
+The bridge and teacher exporter reject held-out training prompts.
+
+The bank `chorus-rules-v1` varies explanations and section order. All variants share
+verbatim scoring constants, pitch notation, piece parameters, and chord plans.
+Actions, private notebooks, speech limits, and counterfactual scoring are unchanged.
+Bump the bank version whenever any template changes.
+
+Build the bridge with `nim c --path:src tools/train_bridge.nim`. Launch it as
+`tools/train_bridge coworld_manifest_template.json standard --language` for full
+JSON actions matching the displayed prompt. Omit `--language` for the factorized
+numeric policy interface. Reset accepts `promptVariant` and `promptSeed`.
+Every decision includes private `semantic_view.prompt_template` metadata with
+bank, selected variant, requested selection, seed, and exact system/user SHA-256 hashes.
+
+Build the exporter with `nim c --path:src tools/export_posttrain.nim`. From a clean
+committed checkout, run `tools/export_posttrain OUTPUT 10 1 standard 0` to export
+five wordings per scenario across ten seeds. Omit the final prompt seed for canonical
+export. Each group of five uses consecutive prompt seeds beginning at that value.
+All wordings and game variants share a `chorus-<seed>` family. Families divisible
+by five enter validation; others enter training. Keep these family assignments
+when combining corpora. `prompt-provenance.jsonl` joins the unchanged training
+example format by `(episode_id, decision_id)`; `manifest.json` records the source,
+bank, selection, complete-game scores, and teacher identity.
+
+Hosted games write private newline-delimited JSON to `COGAME_SAVE_TRAJECTORY_URI`
+when configured. The schema is `chorus.prompt-provenance.v1`, **not** a native
+model decision trajectory. Each `kind: prompt` record contains seat, turn, attempt,
+exact messages, and prompt metadata. `scope: configured_prompt` records intended
+context even for scripted seats; `scope: request` records a submitted request,
+including retry instructions. Neither proves generation or supplies a training
+label. The final `kind: episode` record includes reason, scores, game seed, bank,
+selected wording, prompt seed, record count, and `COWORLD_SOURCE_REVISION`.
+An empty source revision is unqualified evidence. Keep this artifact private;
+public replays and results do not include the new prompt records.
+
+For controlled evaluation, pin source, model, operator strategy, game variant,
+seeds, and budgets; compare canonical-trained and mixed-trained policies on the
+same held-out games. Report score distributions, invalid actions, retries,
+fallbacks, and completion rates separately. Scripted checks establish unchanged
+game semantics, not reduced model collapse or improved learning.
+
+Complete-flow checks:
+
+```bash
+python tools/test_prompt_variants.py /absolute/path/to/bridge
+python tools/test_prompt_socket_games.py /absolute/path/to/game /new/private/output SOURCE_REVISION
+python tools/test_prompt_export.py /absolute/path/to/export /new/private/output
+```
+
+The socket check disables providers, uses real scripted seats, waits for complete
+results and private artifacts, then stops its server during the unchanged shutdown
+grace. Existing Docker CI separately checks natural process completion. Pass the
+original bridge as a second argument to the variant check for canonical byte parity.

@@ -6,10 +6,22 @@ type
   PlayerConfig* = object
     name*: string
 
+  PromptVariant* = enum
+    pvCanonical = "canonical"
+    pvPlain = "plain"
+    pvNumbered = "numbered"
+    pvQuestions = "questions"
+    pvReordered = "reordered"
+    pvHeldoutBriefing = "heldout-briefing"
+    pvHeldoutReference = "heldout-reference"
+    pvMixed = "mixed"
+
   GameConfig* = object
     tokens*: seq[string]
     players*: seq[PlayerConfig]
     seed*: int
+    promptVariant*: PromptVariant
+    promptSeed*: int
     bars*: int                  ## turns in the episode (4..16, default 8)
     talk*: bool                 ## seats may send one 100-char line a turn
     episodeTimeoutSeconds*: int ## assumed platform kill time when the env is
@@ -60,6 +72,10 @@ proc defaultGameConfig*(): GameConfig =
     llmTimeoutSeconds: 30
   )
 
+proc selectedPromptVariant*(config: GameConfig): PromptVariant =
+  if config.promptVariant == pvMixed: PromptVariant(config.promptSeed mod 5)
+  else: config.promptVariant
+
 proc update*(config: var GameConfig, configJson: string) =
   ## Applies a runtime JSON config on top of the defaults.
   if configJson.strip().len == 0:
@@ -77,6 +93,16 @@ proc update*(config: var GameConfig, configJson: string) =
       config.players.add(PlayerConfig(name: player["name"].getStr()))
   if node.hasKey("seed"):
     config.seed = node["seed"].getInt()
+  if node.hasKey("promptVariant"):
+    config.promptVariant = parseEnum[PromptVariant](node["promptVariant"].getStr())
+  if node.hasKey("promptSeed"):
+    if node["promptSeed"].kind != JInt:
+      raise newException(ChorusError, "promptSeed must be an integer")
+    config.promptSeed = node["promptSeed"].getInt()
+  if config.promptSeed < 0:
+    raise newException(ChorusError, "promptSeed must be nonnegative")
+  if config.promptVariant == pvMixed and not node.hasKey("promptSeed"):
+    raise newException(ChorusError, "mixed wording requires an explicit promptSeed")
   if node.hasKey("bars"):
     config.bars = node["bars"].getInt()
   if node.hasKey("talk"):
