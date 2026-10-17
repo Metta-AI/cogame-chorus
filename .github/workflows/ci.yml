@@ -140,7 +140,7 @@ jobs:
               fi
               echo "::group::nim r ${flags} --path:src ${t}"
               # shellcheck disable=SC2086
-              if ! nim r ${flags} --path:src "${t}"; then
+              if ! nim r ${flags} --path:src -o:/tmp/chorus-existing-test "${t}"; then
                 echo "::error::FAILED (${m}) ${t}"
                 fail=1
               fi
@@ -148,6 +148,17 @@ jobs:
             done
           done
           exit "${fail}"
+
+      - name: Complete prompt-diversity workflows
+        run: |
+          set -euo pipefail
+          pip install websockets==15.0.1
+          nim c -d:release --parallelBuild:1 --path:src -o:/tmp/chorus-game src/chorus.nim
+          nim c -d:release --parallelBuild:1 --path:src -o:/tmp/chorus-bridge tools/train_bridge.nim
+          nim c -d:release --parallelBuild:1 --path:src -o:/tmp/chorus-export tools/export_posttrain.nim
+          python tools/test_prompt_variants.py /tmp/chorus-bridge
+          python tools/test_prompt_socket_games.py /tmp/chorus-game /tmp/chorus-socket-games "$GITHUB_SHA"
+          python tools/test_prompt_export.py /tmp/chorus-export /tmp/chorus-export-games
 
   # ---------------------------------------------------------------------
   # Packaging smoke: the production image builds, and one real episode runs
