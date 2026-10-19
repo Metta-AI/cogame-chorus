@@ -17,7 +17,6 @@ when isMainModule:
   let variant = if args.len >= 4: args[3] else: "standard"
   let mixed = args.len == 5
   let firstPromptSeed = if mixed: parseInt(args[4]) else: 0
-  let wordings = if mixed: 5 else: 1
   doAssert firstPromptSeed >= 0
   doAssert execProcess("git status --porcelain").strip().len == 0, "commit source before exporting"
   if games < 10 or firstSeed < 1:
@@ -36,11 +35,11 @@ when isMainModule:
       variantConfig = entry["game_config"]
   doAssert not variantConfig.isNil
   var
-    provenance, trainRows: seq[string]
+    trainRows: seq[string]
     validationRows: seq[string]
     runs = newJArray()
-  for index in 0 ..< games * wordings:
-    let seed = firstSeed + index div wordings
+  for index in 0 ..< games:
+    let seed = firstSeed + index
     var config = defaultGameConfig()
     let runtimeConfig = copy(variantConfig)
     runtimeConfig["tokens"] = newJArray()
@@ -49,14 +48,14 @@ when isMainModule:
     runtimeConfig["seed"] = %seed
     if mixed:
       runtimeConfig["promptVariant"] = %"mixed"
-      runtimeConfig["promptSeed"] = %(firstPromptSeed + index mod wordings)
+      runtimeConfig["promptSeed"] = %(firstPromptSeed + index)
     config.update($runtimeConfig)
     doAssert config.selectedPromptVariant notin {pvHeldoutBriefing, pvHeldoutReference},
       "held-out wording cannot enter a teacher corpus"
     config = sampleEpisode(config)
     var sim = initSim(config)
     let episode = "chorus-" & variant & "-" & $seed &
-      (if mixed: "-" & $config.selectedPromptVariant else: "")
+      (if mixed: "-" & $config.selectedPromptVariant & "-" & $config.promptSeed else: "")
     let family = "chorus-" & $seed
     var rows: seq[string]
     while not sim.done:
@@ -74,9 +73,6 @@ when isMainModule:
         doAssert parsed.notes == teacher.notes
         let system = systemPrompt(view, seat)
         let user = userPrompt(view, seat, OperatorPrompt)
-        provenance.add($(%*{"episode_id": episode, "seed": family,
-          "decision_id": view.turn * Seats + seat,
-          "prompt_template": promptMetadata(config, system, user)}))
         rows.add($(%*{
           "episode_id": episode,
           "seed": family,
@@ -102,10 +98,9 @@ when isMainModule:
       "scores": outcome["scores"], "piece": outcome["piece"]})
   writeFile(output / "train.jsonl", trainRows.join("\n") & "\n")
   writeFile(output / "validation.jsonl", validationRows.join("\n") & "\n")
-  writeFile(output / "prompt-provenance.jsonl", provenance.join("\n") & "\n")
   writeFile(output / "manifest.json", pretty(%*{
     "schema_version": 1,
-    "prompt_bank": PromptBankVersion, "wordings_per_family": wordings,
+    "prompt_bank": PromptBankVersion,
     "game": "chorus",
     "variant": variant,
     "source_revision": sourceRevision,

@@ -152,12 +152,9 @@ jobs:
       - name: Complete prompt-diversity workflows
         run: |
           set -euo pipefail
-          pip install websockets==15.0.1
-          nim c -d:release --parallelBuild:1 --path:src -o:/tmp/chorus-game src/chorus.nim
           nim c -d:release --parallelBuild:1 --path:src -o:/tmp/chorus-bridge tools/train_bridge.nim
           nim c -d:release --parallelBuild:1 --path:src -o:/tmp/chorus-export tools/export_posttrain.nim
           python tools/test_prompt_variants.py /tmp/chorus-bridge
-          python tools/test_prompt_socket_games.py /tmp/chorus-game /tmp/chorus-socket-games "$GITHUB_SHA"
           python tools/test_prompt_export.py /tmp/chorus-export /tmp/chorus-export-games
 
   # ---------------------------------------------------------------------

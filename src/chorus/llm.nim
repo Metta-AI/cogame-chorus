@@ -46,7 +46,6 @@ type
     steps*: seq[int]
     say*: string
     notes*: string      ## "" when the reply carried none
-    promptEvidence*: seq[JsonNode] ## Prompt intent only, never model-generation evidence.
     scripted*: bool     ## true when a baseline produced this bar rather
                         ## than a parsed model reply — including the
                         ## fallback after the retry is exhausted. The
@@ -575,12 +574,6 @@ proc parseDecision*(payload: JsonNode, turn: int): Decision =
       "target must be 0.." & $turn & ": " & $target)
   result.target = target
 
-proc promptRecord(sim: Sim, seat, attempt: int, scope, system, user: string): JsonNode =
-  %*{"schema": "chorus.prompt-provenance.v1", "kind": "prompt", "scope": scope,
-    "seat": seat, "turn": sim.turn, "attempt": attempt,
-    "prompt_template": promptMetadata(sim.config, system, user),
-    "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
-
 proc decideAll*(
   client: LlmClient,
   sim: Sim,
@@ -592,12 +585,9 @@ proc decideAll*(
   ## falls back to the `arpeggio` baseline so the episode always advances.
   ## `prompts` and `scripted` are indexed by SEAT.
   result = newSeq[Decision](seats.len)
-  var evidence = newSeq[seq[JsonNode]](seats.len)
   var open: seq[int]     ## indexes into `seats` still undecided
   var reasons = newSeq[string](seats.len)
   for index, seat in seats:
-    evidence[index].add(promptRecord(sim, seat, 0, "configured_prompt",
-      systemPrompt(sim, seat), userPrompt(sim, seat, prompts[seat])))
     let kind = scripted[seat]
     if kind != skNone or client.disabled:
       result[index] = scriptedAction(sim, seat,
@@ -613,9 +603,7 @@ proc decideAll*(
       var user = sim.userPrompt(seat, prompts[seat])
       if attempt > 0:
         user.add(sim.retryHint(reasons[index]))
-      let system = systemPrompt(sim, seat)
-      evidence[index].add(promptRecord(sim, seat, attempt, "request", system, user))
-      let request = client.requestFor(system, user, seat)
+      let request = client.requestFor(systemPrompt(sim, seat), user, seat)
       batch.post(request.url, request.headers, request.body, $index)
     let responses = client.curl.makeRequests(batch, client.timeoutSeconds)
     var stillOpen: seq[int]
@@ -640,6 +628,3 @@ proc decideAll*(
     let seat = seats[index]
     echo "chorus llm: seat ", seat, " falling back to the arpeggio baseline"
     result[index] = scriptedAction(sim, seat, skArpeggio)
-
-  for index in 0 ..< seats.len:
-    result[index].promptEvidence = evidence[index]
