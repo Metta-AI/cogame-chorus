@@ -29,11 +29,13 @@ for variant, bars in (("standard", 8), ("long-form", 10), ("no-talk", 8)):
         seen = set()
         for split in ("train", "validation"):
             families = set()
+            wordings = set()
             count = 0
             for line in (output / f"{split}.jsonl").open():
                 row = json.loads(line)
                 episode = row["episode_id"]
                 run = runs[episode]
+                wordings.add(run["prompt_variant"])
                 family = f"chorus-{run['seed']}"
                 assert row["seed"] == family
                 assert (run["seed"] % 5 == 0) == (split == "validation")
@@ -58,6 +60,8 @@ for variant, bars in (("standard", 8), ("long-form", 10), ("no-talk", 8)):
                 count += 1
             assert count == manifest[split + "_examples"]
             splits[split] = families
+            if mixed and split == "train":
+                assert wordings == {"canonical", "plain", "numbered", "questions", "reordered"}
         assert len(splits["train"]) == 8 and len(splits["validation"]) == 2
         assert splits["train"].isdisjoint(splits["validation"])
         families = {}

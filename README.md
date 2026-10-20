@@ -128,8 +128,8 @@ bank, selected variant, requested selection, seed, and exact system/user SHA-256
 
 Build the exporter with `nim c --path:src tools/export_posttrain.nim`. From a clean
 committed checkout, run `tools/export_posttrain OUTPUT 10 1 standard 0` to export
-ten games with cycling wordings. The prompt seed advances once per game; the
-requested game count is unchanged. Omit the final argument for canonical export.
+ten games with wordings cycling independently within training and validation;
+the requested game count is unchanged. Omit the final argument for canonical export.
 All wordings and game variants share a `chorus-<seed>` family. Families divisible
 by five enter validation; others enter training. Keep these assignments when
 combining corpora. The original train/validation files contain exact messages,
