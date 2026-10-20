@@ -58,7 +58,7 @@ when isMainModule:
     config = sampleEpisode(config)
     var sim = initSim(config)
     let episode = "chorus-" & variant & "-" & $seed &
-      (if mixed: "-" & $config.selectedPromptVariant & "-" & $config.promptSeed else: "")
+      "-" & $config.promptVariant & "-" & $config.selectedPromptVariant & "-" & $config.promptSeed
     let family = "chorus-" & $seed
     var rows: seq[string]
     while not sim.done:

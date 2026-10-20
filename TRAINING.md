@@ -20,14 +20,9 @@ pieces stay in one split. The manifest records source revision, variant,
 scores, piece score, and row counts. Existing output directories are never
 overwritten.
 
-Train an output with Metta post-training:
+Use the [post-training research package](https://github.com/Metta-AI/posttraining-research/tree/main/packages/metta-posttraining)
+for current training and adapter-packaging workflows.
 
-```sh
-nix develop -c uv run --package metta-posttrain --extra train \
-  python -m metta_posttrain.train --dataset /tmp/chorus-standard \
-  --output /tmp/chorus-adapter --model Qwen/Qwen3-0.6B \
-  --max-steps 100 --max-length 4096
-```
 
 Ten complete pieces per variant yielded 1,040 examples. Every example fit
 the Qwen2.5-0.5B-Instruct tokenizer in 4,096 tokens; the maximum was 3,125.
@@ -54,3 +49,10 @@ the same frozen piece. The published `arpeggio` baseline supplies opponents
 and teacher labels. Terminal rewards use the game's own signed credit divided
 by 100, within the shared [-1, 1] utility range. Text messages retain the
 hosted prompts for Metta post-training.
+
+## Matched prompt collections
+
+Append `FIRST_PROMPT_SEED` to the exporter command to cycle training wordings
+separately within each split. Omitting it uses the manifest prompt configuration.
+Episode IDs include requested selection, resolved wording, and prompt seed for
+both paths. Scenario-family IDs stay unchanged across matched collections.
