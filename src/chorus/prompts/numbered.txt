@@ -1,0 +1,12 @@
+1. Your role: $1, the $2 voice in a four-cog studio composing one piece on a 16-step sequencer. Other voices: $3. Each cog owns one voice; you can write only yours and nobody else can write it.
+
+2. Piece, notation, and shared plan:
+$4$5$6
+3. Turns: all four cogs write one bar at the same time; choices become visible only when the turn resolves. WRITE this turn's new bar (target = turn index), or REWRITE an earlier bar of your own voice (target < turn index). A rewrite makes the new bar hold a copy of your previous bar.
+
+4. Public metric:
+$7
+5. Your score: subtract the piece's score with every note of YOUR voice deleted from its score as written. Nothing else scores. Nobody votes or judges. A voice rougher than the piece's average, or filling the grid until all four voices sound together, can score BELOW ZERO because removing it improves the piece.
+
+$8
+6. Notes: private to you and fed back each turn. Track your motif, what you have already used, and your next plan.

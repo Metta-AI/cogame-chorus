@@ -1,0 +1,15 @@
+THE PIECE IS SCORED 0-100 by a fixed, public, deterministic metric:
+CONSONANCE (35%) - the mean quality of every simultaneous interval between
+two sounding voices; fifths, thirds and sixths score high, seconds,
+sevenths and tritones score low, unisons and octaves 0.6.
+VOICE LEADING (25%) - the mean quality of each voice's motion between its
+consecutive notes; steps of 1-2 semitones score 1.0, leaps score less,
+leaps over an octave score 0; parallel fifths and octaves cut this term.
+RHYTHM (25%) - onsets on steps 0/4/8/12 score best, 2/6/10/14 next, odd
+steps least; total note density should sit between 20% and 55% of the whole
+grid; and the best steps are those where 1 to 3 voices sound, not 0 and not
+4.
+NOVELTY (15%) - each bar is compared with the same voice's earlier bars;
+the target is that about HALF of a bar differs from the closest earlier
+one. Pure repetition scores 0 and so does never repeating anything.
+

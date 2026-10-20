@@ -104,3 +104,52 @@ and offline certification finishes in seconds.
 
 Full rules and the metric with worked examples are in the manifest's `rules.md` and `scoring.md`
 pages, and the design note is at `docs/plans/2026-08-24-chorus-design.md`.
+
+## Prompt diversity and post-training
+
+`promptVariant` selects episode-stable rules wording. The training bank contains
+`canonical`, `plain`, `numbered`, `questions`, and `reordered`; `mixed` selects
+`promptSeed mod 5` from that order. Mixed selection requires an explicit nonnegative
+integer `promptSeed`, independent of the game seed. Defaults remain canonical.
+`heldout-briefing` and `heldout-reference` require `split: validation` in language
+bridge resets. The teacher exporter rejects them.
+
+The bank `chorus-rules-v1` varies explanations and section order. All variants share
+verbatim scoring constants, pitch notation, piece parameters, and chord plans.
+Actions, private notebooks, speech limits, and counterfactual scoring are unchanged.
+Bump the bank version whenever any template changes.
+
+Build the bridge with `nim c --path:src tools/train_bridge.nim`. Launch it as
+`tools/train_bridge coworld_manifest_template.json standard --language` for full
+JSON actions matching the displayed prompt. Omit `--language` for the factorized
+numeric policy interface. Reset accepts `promptVariant` and `promptSeed`.
+Every decision includes private `semantic_view.prompt_template` metadata with
+bank, selected variant, requested selection, seed, and exact system/user SHA-256 hashes.
+
+Build the exporter with `nim c --path:src tools/export_posttrain.nim`. From a clean
+committed checkout, run `tools/export_posttrain OUTPUT 10 1 standard 0` to export
+ten games with wordings cycling independently within training and validation;
+the requested game count is unchanged. Omit the final argument for canonical export.
+All wordings and game variants share a `chorus-<seed>` family. Families divisible
+by five enter validation; others enter training. Keep these assignments when
+combining corpora. The original train/validation files contain exact messages,
+and the manifest records source, bank, selection, complete-game scores and teacher.
+
+For controlled evaluation, pin source, model, operator strategy, game variant,
+seeds, and budgets; compare canonical-trained and mixed-trained policies on the
+same held-out games. Report score distributions, invalid actions, retries,
+fallbacks, and completion rates separately. Scripted checks establish unchanged
+game semantics, not reduced model collapse or improved learning.
+
+Complete-flow checks:
+
+```bash
+python tools/test_prompt_variants.py /absolute/path/to/bridge
+python tools/test_prompt_export.py /absolute/path/to/export /new/private/output
+```
+
+The 24 complete bridge games cover all three variants, all seven direct wordings
+and one mixed selection. They check simultaneous choices, rewrite turns, private
+notes, exact hashes and unchanged outcomes. Export checks compare 20 games per
+variant and retain scenario-family split checks. Existing native-client and Docker
+checks remain in place.

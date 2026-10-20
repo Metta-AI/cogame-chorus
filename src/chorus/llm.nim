@@ -23,7 +23,10 @@ import
   std/[json, math, os, strutils, unicode],
   bitworld/runtime,
   curly,
-  sim
+  sim,
+  prompts
+
+export prompts
 
 const
   AnthropicUrl = "https://api.anthropic.com/v1/messages"
@@ -282,45 +285,39 @@ proc systemPrompt*(sim: Sim, seat: int): string =
   for other in 0 ..< Voices:
     if other != voice:
       others.add(sim.voiceLabel(other))
+  let piece = "THE PIECE: " & $sim.config.bars & " bars of " & $Steps &
+    " steps, key " & sim.keyName() & ", " & $sim.bpm &
+    " BPM. Every step is one note or a rest, and a note lasts exactly one " &
+    "step.\n\n"
+  let notation = "NOTATION: a bar is " & $Steps & " tokens. -1 is a rest. 0.." &
+    $MaxToken & " are scale degrees: 0 is the tonic, 6 the seventh, 7 the " &
+    "tonic an octave up, 13 the seventh two octaves up. Your voice sounds " &
+    "in the " & voiceUp & " register (MIDI " & $sim.baseMidi(voice) & ".." &
+    $(sim.baseMidi(voice) + 23) & ").\n\n"
+  let chords = "THE CHORD PLAN is fixed, shared and public: " &
+    sim.chordPlanLine() & ". The chord tones of a chord rooted on degree r " &
+    "are r, r+2 and r+4.\n\n"
+  if sim.config.selectedPromptVariant != pvCanonical:
+    let talk = if sim.config.talk:
+        "Each turn you may SAY one short line (max " & $MaxSayLen &
+        " characters). All three other cogs read it next turn. It is not binding and may or may not be honest."
+      else: ""
+    return renderVariantPrompt(sim.config, me, voiceUp, others.join(", "), piece, notation, chords, talk)
   result.add("You are " & me & ", the " & voiceUp &
     " voice in a four-cog studio writing one piece of music together on a " &
     "16-step sequencer. The other voices are " & others.join(", ") &
     ". Each cog owns one voice; nobody else can write a note in yours and " &
     "you cannot write a note in theirs.\n\n")
-  result.add("THE PIECE: " & $sim.config.bars & " bars of " & $Steps &
-    " steps, key " & sim.keyName() & ", " & $sim.bpm &
-    " BPM. Every step is one note or a rest, and a note lasts exactly one " &
-    "step.\n\n")
-  result.add("NOTATION: a bar is " & $Steps & " tokens. -1 is a rest. 0.." &
-    $MaxToken & " are scale degrees: 0 is the tonic, 6 the seventh, 7 the " &
-    "tonic an octave up, 13 the seventh two octaves up. Your voice sounds " &
-    "in the " & voiceUp & " register (MIDI " & $sim.baseMidi(voice) & ".." &
-    $(sim.baseMidi(voice) + 23) & ").\n\n")
-  result.add("THE CHORD PLAN is fixed, shared and public: " &
-    sim.chordPlanLine() & ". The chord tones of a chord rooted on degree r " &
-    "are r, r+2 and r+4.\n\n")
+  result.add(piece)
+  result.add(notation)
+  result.add(chords)
   result.add("""EACH TURN every cog writes one bar, all four at the same time, and nobody
 sees the others' choice until the turn resolves. You may WRITE the new bar
 (target = this turn's index) or REWRITE one of your own earlier bars
 (target < this turn's index); if you rewrite, your new bar automatically
 holds a copy of your previous bar.
 
-THE PIECE IS SCORED 0-100 by a fixed, public, deterministic metric:
-CONSONANCE (35%) - the mean quality of every simultaneous interval between
-two sounding voices; fifths, thirds and sixths score high, seconds,
-sevenths and tritones score low, unisons and octaves 0.6.
-VOICE LEADING (25%) - the mean quality of each voice's motion between its
-consecutive notes; steps of 1-2 semitones score 1.0, leaps score less,
-leaps over an octave score 0; parallel fifths and octaves cut this term.
-RHYTHM (25%) - onsets on steps 0/4/8/12 score best, 2/6/10/14 next, odd
-steps least; total note density should sit between 20% and 55% of the whole
-grid; and the best steps are those where 1 to 3 voices sound, not 0 and not
-4.
-NOVELTY (15%) - each bar is compared with the same voice's earlier bars;
-the target is that about HALF of a bar differs from the closest earlier
-one. Pure repetition scores 0 and so does never repeating anything.
-
-YOUR SCORE IS A COUNTERFACTUAL: the piece is scored once as written and
+""" & ScoringRules & """YOUR SCORE IS A COUNTERFACTUAL: the piece is scored once as written and
 once with every note of YOUR voice deleted; your score is the difference.
 Nothing else scores. There is no vote and nobody judges you. A voice that
 is rougher than the piece's average, or that fills the grid until all four

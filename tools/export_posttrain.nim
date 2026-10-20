@@ -1,5 +1,5 @@
 ## Export complete Chorus pieces as Metta post-training examples.
-## Usage: nim r --path:src tools/export_posttrain.nim OUTPUT GAMES [FIRST_SEED] [VARIANT]
+## Usage: nim r --path:src tools/export_posttrain.nim OUTPUT GAMES [FIRST_SEED] [VARIANT] [FIRST_PROMPT_SEED]
 
 import std/[json, os, osproc, strutils]
 import chorus/[sim, llm]
@@ -9,12 +9,16 @@ const Variants = ["standard", "long-form", "no-talk"]
 
 when isMainModule:
   let args = commandLineParams()
-  if args.len notin 2 .. 4:
-    quit("usage: export_posttrain OUTPUT GAMES [FIRST_SEED] [VARIANT]", 1)
+  if args.len notin 2 .. 5:
+    quit("usage: export_posttrain OUTPUT GAMES [FIRST_SEED] [VARIANT] [FIRST_PROMPT_SEED]", 1)
   let output = args[0]
   let games = parseInt(args[1])
   let firstSeed = if args.len >= 3: parseInt(args[2]) else: 1
-  let variant = if args.len == 4: args[3] else: "standard"
+  let variant = if args.len >= 4: args[3] else: "standard"
+  let mixed = args.len == 5
+  let firstPromptSeed = if mixed: parseInt(args[4]) else: 0
+  doAssert firstPromptSeed >= 0
+  doAssert execProcess("git status --porcelain").strip().len == 0, "commit source before exporting"
   if games < 10 or firstSeed < 1:
     quit("at least ten games and a positive first seed are required", 1)
   if variant notin Variants:
@@ -22,6 +26,7 @@ when isMainModule:
   if dirExists(output) or fileExists(output):
     quit("output already exists: " & output, 1)
   createDir(output)
+  setFilePermissions(output, {fpUserRead, fpUserWrite, fpUserExec})
   let sourceRevision = execProcess("git rev-parse HEAD").strip()
   let manifest = parseFile("coworld_manifest_template.json")
   var variantConfig: JsonNode
@@ -33,16 +38,28 @@ when isMainModule:
     trainRows: seq[string]
     validationRows: seq[string]
     runs = newJArray()
-  for seed in firstSeed ..< firstSeed + games:
+    wordingCounts: array[2, int]
+  for index in 0 ..< games:
+    let seed = firstSeed + index
+    let partition = ord(seed mod 5 == 0)
     var config = defaultGameConfig()
     let runtimeConfig = copy(variantConfig)
     runtimeConfig["tokens"] = newJArray()
     for seat in 0 ..< Seats:
       runtimeConfig["tokens"].add(%("t" & $seat))
     runtimeConfig["seed"] = %seed
+    if mixed:
+      runtimeConfig["promptVariant"] = %"mixed"
+      runtimeConfig["promptSeed"] = %(firstPromptSeed + wordingCounts[partition])
+      inc wordingCounts[partition]
     config.update($runtimeConfig)
+    doAssert config.selectedPromptVariant notin {pvHeldoutBriefing, pvHeldoutReference},
+      "held-out wording cannot enter a teacher corpus"
     config = sampleEpisode(config)
     var sim = initSim(config)
+    let episode = "chorus-" & variant & "-" & $seed &
+      "-" & $config.promptVariant & "-" & $config.selectedPromptVariant & "-" & $config.promptSeed
+    let family = "chorus-" & $seed
     var rows: seq[string]
     while not sim.done:
       let view = sim
@@ -57,13 +74,15 @@ when isMainModule:
         doAssert parsed.steps == teacher.steps
         doAssert parsed.say == teacher.say
         doAssert parsed.notes == teacher.notes
+        let system = systemPrompt(view, seat)
+        let user = userPrompt(view, seat, OperatorPrompt)
         rows.add($(%*{
-          "episode_id": "chorus-" & variant & "-" & $seed,
-          "seed": "chorus-" & variant & "-" & $seed,
+          "episode_id": episode,
+          "seed": family,
           "decision_id": view.turn * Seats + seat,
           "prompt": [
-            {"role": "system", "content": systemPrompt(view, seat)},
-            {"role": "user", "content": userPrompt(view, seat, OperatorPrompt)}
+            {"role": "system", "content": system},
+            {"role": "user", "content": user}
           ],
           "completion": [{"role": "assistant", "content": $completion}],
           "game": "chorus",
@@ -77,12 +96,14 @@ when isMainModule:
       validationRows.add(rows)
     else:
       trainRows.add(rows)
-    runs.add(%*{"seed": seed, "decisions": rows.len,
+    runs.add(%*{"seed": seed, "episode": episode, "prompt_variant": $config.selectedPromptVariant,
+      "prompt_seed": config.promptSeed, "decisions": rows.len,
       "scores": outcome["scores"], "piece": outcome["piece"]})
   writeFile(output / "train.jsonl", trainRows.join("\n") & "\n")
   writeFile(output / "validation.jsonl", validationRows.join("\n") & "\n")
   writeFile(output / "manifest.json", pretty(%*{
     "schema_version": 1,
+    "prompt_bank": PromptBankVersion,
     "game": "chorus",
     "variant": variant,
     "source_revision": sourceRevision,
