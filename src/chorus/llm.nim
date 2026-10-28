@@ -20,10 +20,11 @@
 ## certification still completes - this fallback is load-bearing.
 
 import
-  std/[json, math, os, strutils, unicode],
+  std/[json, math, options, os, strutils, times, unicode],
   bitworld/runtime,
   curly,
   sim,
+  training,
   prompts
 
 export prompts
@@ -67,6 +68,7 @@ type
                           ## picks from bedrockModels instead
     maxOutputTokens: int
     timeoutSeconds: int
+    nativeAttempts*: seq[seq[DecisionAttempt]]
     disabled*: bool   ## true once credentials are known-unavailable
 
 proc parseScriptKind*(text: string): ScriptKind =
@@ -584,6 +586,8 @@ proc decideAll*(
   ## One decision per seat in `seats`, in order. Never raises: any failure
   ## falls back to the `arpeggio` baseline so the episode always advances.
   ## `prompts` and `scripted` are indexed by SEAT.
+  let capture = getEnv(CogameSaveTrajectoryUriEnv).len > 0
+  if capture: client.nativeAttempts = newSeq[seq[DecisionAttempt]](Seats)
   result = newSeq[Decision](seats.len)
   var open: seq[int]     ## indexes into `seats` still undecided
   var reasons = newSeq[string](seats.len)
@@ -598,31 +602,54 @@ proc decideAll*(
     if open.len == 0 or client.disabled:
       break
     var batch: RequestBatch
+    var pendingEvidence: seq[DecisionAttempt]
     for index in open:
       let seat = seats[index]
       var user = sim.userPrompt(seat, prompts[seat])
       if attempt > 0:
         user.add(sim.retryHint(reasons[index]))
       let request = client.requestFor(systemPrompt(sim, seat), user, seat)
+      if capture:
+        pendingEvidence.add(nativeAttempt(sim.config.players[seat].name, sim.turn,
+          seat, attempt, request.body))
       batch.post(request.url, request.headers, request.body, $index)
+    let started = epochTime()
     let responses = client.curl.makeRequests(batch, client.timeoutSeconds)
+    let latencyMs = int((epochTime() - started) * 1000.0)
     var stillOpen: seq[int]
     for position, index in open:
       let seat = seats[index]
+      var evidence: DecisionAttempt
+      if capture: evidence = pendingEvidence[position]
       try:
+        if capture:
+          evidence.receiveNativeResponse(responses[position].response,
+            responses[position].error, latencyMs)
         let text = client.textOf(responses[position].response,
           responses[position].error, batch[position].url)
-        var decision = parseDecision(extractJsonObject(text), sim.turn)
+        let payload = extractJsonObject(text)
+        var decision = parseDecision(payload, sim.turn)
         ## Reject illegal replies here so the retry carries the hint.
         var probe = sim
         probe.applyBar(seat, decision.target, decision.steps, decision.say,
           decision.notes, false)
+        if capture:
+          evidence.parsedAction = %*{"target": decision.target, "steps": decision.steps,
+            "say": (if sim.config.talk: decision.say else: ""), "notes": decision.notes}
+          evidence.accepted = payload{"steps"} == %decision.steps and
+            (not payload.hasKey("target") or payload["target"] == %decision.target) and
+            payload{"say"}.getStr() == evidence.parsedAction["say"].getStr() and
+            payload{"notes"}.getStr() == decision.notes
+          if not evidence.accepted:
+            evidence.rejectionReason = some("native parser normalized supplied action fields")
         result[index] = decision
       except CatchableError as error:
+        if capture: evidence.rejectionReason = some(error.msg)
         reasons[index] = cleanText(error.msg, MaxErrorLen)
         echo "chorus llm: seat ", seat, " attempt ", attempt, " failed: ",
           reasons[index]
         stillOpen.add(index)
+      if capture: client.nativeAttempts[seat].add(evidence)
     open = stillOpen
   for index in open:
     let seat = seats[index]
