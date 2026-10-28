@@ -107,6 +107,28 @@ pages, and the design note is at `docs/plans/2026-08-24-chorus-design.md`.
 
 ## Prompt diversity and post-training
 
+Native game-owned model calls can write private decision evidence through
+`COGAME_SAVE_TRAJECTORY_URI`. Capture requires `COWORLD_EPISODE_ID`,
+`COWORLD_GAME_VERSION`, and `COWORLD_SOURCE_REVISION`. The game retains exact
+request bodies, received response bytes and exposed platform IDs from the existing
+parallel Curly batches, including both retry attempts. Recorded latency is the
+observed parallel-batch wall time. Native parsing, notes, scheduling, fallbacks,
+scoring and model requests are unchanged. A normalized proposal is retained but
+has no selected training target; scripted actions carry unknown origin. Missing
+usage or sampling evidence stays absent. Private evidence seals before public
+results and replay. Receipt admission and independent scenario review remain
+required; software fixtures do not provide model demonstrations.
+
+After building the native game and player, run the full capture system check:
+
+```bash
+python3 tools/test_native_capture.py /absolute/path/to/chorus /absolute/path/to/chorus-player /new/private/output
+```
+
+It plays all three complete manifest variants with capture enabled and disabled,
+comparing native outcomes and replays while checking retries, fallbacks,
+normalization exclusions, private operator separation, and absent usage fields.
+
 `promptVariant` selects episode-stable rules wording. The training bank contains
 `canonical`, `plain`, `numbered`, `questions`, and `reordered`; `mixed` selects
 `promptSeed mod 5` from that order. Mixed selection requires an explicit nonnegative

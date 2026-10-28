@@ -30,6 +30,7 @@ import
   mummy,
   mummy/routers,
   llm,
+  training,
   sim
 
 const
@@ -52,6 +53,7 @@ type
     globalSockets: HashSet[WebSocket]
     started: bool
     finished: bool
+    trajectory: DecisionTrajectory
 
 var
   stateLock: Lock
@@ -196,6 +198,8 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
     state.finished = true
     results = state.sim.resultsJson()
     replayData = state.replayPayload(results)
+    # Seal private evidence before the result artifact can stop the game pod.
+    state.trajectory.finishNativeTrajectory(state.sim)
 
     ## Send final frames to players BEFORE writing artifacts: the hosted
     ## worker tears player pods down as soon as results.json exists, and
@@ -293,6 +297,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       var seats: seq[int]
       var prompts: seq[string]
       var scripted: seq[ScriptKind]
+      var privateViews: seq[JsonNode]
       withLock stateLock:
         if state.sim.done:
           break
@@ -309,6 +314,9 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         simCopy = state.sim
         prompts = state.prompts
         scripted = state.scripted
+        if not state.trajectory.isNil:
+          for seat in seats:
+            privateViews.add(state.playerStateJson(seat))
         echo "chorus: turn ", state.sim.turn, " of ", config.bars,
           " at ", (epochTime() - gameStart).int, "s"
 
@@ -339,6 +347,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
 
       withLock stateLock:
         for index, seat in seats:
+          let decisionTurn = simCopy.turn
           let decision = decisions[index]
           ## Provenance rides in the decision: a seat whose two attempts
           ## timed out or failed to parse comes back from `decideAll` as a
@@ -350,6 +359,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
             (if decision.say.len > 0: " says \"" & decision.say & "\""
              else: ""),
             " at ", (epochTime() - gameStart).int, "s"
+          var applied = decision
           try:
             state.sim.applyBar(seat, decision.target, decision.steps,
               decision.say, decision.notes, wasScripted)
@@ -359,6 +369,15 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
             let fallback = scriptedAction(state.sim, seat, skArpeggio)
             state.sim.applyBar(seat, fallback.target, fallback.steps, "", "",
               true)
+            applied = fallback
+            applied.say = ""
+            applied.notes = ""
+            applied.scripted = true
+          if not state.trajectory.isNil:
+            let action = %*{"target": applied.target, "steps": applied.steps,
+              "say": (if config.talk: applied.say else: ""), "notes": applied.notes}
+            state.trajectory.recordAppliedDecision(config, decisionTurn, seat,
+              privateViews[index], action, applied.scripted, client.nativeAttempts[seat])
         state.broadcastLocked()
 
       ## Pace between turns so spectators can read the bar that just landed.
@@ -581,6 +600,7 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
     raise newException(ChorusError, "tokens and players must align")
   state.config = config
   state.sim = initSim(config)
+  state.trajectory = initNativeTrajectory(config)
   state.prompts = newSeq[string](config.players.len)
   state.scripted = newSeq[ScriptKind](config.players.len)
   runtimeConfigGlobal = runtimeConfig
